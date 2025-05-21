@@ -6,6 +6,9 @@
 #include "Bullet3Common/b3AlignedObjectArray.h"
 #include "Bullet3Common/b3Vector3.h"
 
+// # Vulkan
+#include "vulkan/vulkan_core.h"
+
 class b3GpuNarrowPhase
 {
 protected:
@@ -18,11 +21,15 @@ protected:
 	cl_device_id m_device;
 	cl_command_queue m_queue;
 
+	VkDevice mvk_device;
+	VkQueue mvk_queue;
+	VkCommandPool mvk_cmdPool;
+
 	int registerConvexHullShapeInternal(class b3ConvexUtility* convexPtr, b3Collidable& col);
 	int registerConcaveMeshShape(b3AlignedObjectArray<b3Vector3>* vertices, b3AlignedObjectArray<int>* indices, b3Collidable& col, const float* scaling);
 
 public:
-	b3GpuNarrowPhase(cl_context vtx, cl_device_id dev, cl_command_queue q, const struct b3Config& config);
+	b3GpuNarrowPhase(cl_context vtx, cl_device_id dev, cl_command_queue q, VkDevice vk_device, VkQueue vk_queue, VkCommandPool vk_cmdPool, const struct b3Config& config);
 
 	virtual ~b3GpuNarrowPhase(void);
 

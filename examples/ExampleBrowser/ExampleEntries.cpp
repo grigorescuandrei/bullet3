@@ -399,12 +399,13 @@ static ExampleEntry gDefaultExamples[] =
 #ifdef B3_USE_CLEW
 #ifndef NO_OPENGL3
 static ExampleEntry gOpenCLExamples[] =
-	{
-		ExampleEntry(0, "OpenCL (experimental)"),
-		ExampleEntry(1, "Box-Box", "Full OpenCL implementation of the entire physics and collision detection pipeline, showing box-box rigid body",
-					 OpenCLBoxBoxCreateFunc),
-		ExampleEntry(1, "Pair Bench", "Benchmark of overlapping pair search using OpenCL.", PairBenchOpenCLCreateFunc),
-
+{
+	ExampleEntry(0, "OpenCL (experimental)"),
+	ExampleEntry(1, "Box-Box", "Full OpenCL implementation of the entire physics and collision detection pipeline, showing box-box rigid body",
+				 OpenCLBoxBoxCreateFunc),
+	ExampleEntry(1, "Pair Bench", "Benchmark of overlapping pair search using OpenCL.", PairBenchOpenCLCreateFunc),
+	ExampleEntry(1, "Plane Convex", "Benchmark of convex-plane rigid body collisions using OpenCL", OpenCLConvexPlaneCreateFunc),
+	ExampleEntry(1, "Tetra Breakable", "Benchmark of tetrahedra rigid body collisions using OpenCl", OpenCLTetraCreateFunc)
 };
 #endif
 #endif  //

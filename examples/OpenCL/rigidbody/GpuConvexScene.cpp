@@ -94,6 +94,8 @@ protected:
 	void createFromTetGenData(const char* ele, const char* node);
 
 public:
+	GpuTetraScene(GUIHelperInterface* helper) : GpuConvexScene(helper) {}
+
 	virtual const char* getName()
 	{
 		return "TetraBreakable";
@@ -494,7 +496,7 @@ void GpuTetraScene::createFromTetGenData(const char* ele,
 			{
 				b3Vector4 scaling = b3MakeVector4(1, 1, 1, 1);
 				int colIndex = m_data->m_np->registerConvexHullShape(&mytetra_vertices[0], strideInBytes, numVertices, scaling);
-				b3Vector3 position = b3MakeVector3(0, 150, 0);
+				b3Vector3 position = b3MakeVector3(0, 50, 0);
 				//				position+=average;//*1.2;//*2;
 				position += average * 1.2;  //*2;
 				//rigidBodyPositions.push_back(position);
@@ -593,4 +595,12 @@ int GpuTetraScene::createDynamicsObjects()
 class CommonExampleInterface* OpenCLBoxBoxCreateFunc(struct CommonExampleOptions& options)
 {
 	return new GpuBoxPlaneScene(options.m_guiHelper);
+}
+
+class CommonExampleInterface* OpenCLConvexPlaneCreateFunc(struct CommonExampleOptions& options) {
+	return new GpuConvexPlaneScene(options.m_guiHelper);
+}
+
+class CommonExampleInterface* OpenCLTetraCreateFunc(struct CommonExampleOptions& options) {
+	return new GpuTetraScene(options.m_guiHelper);
 }

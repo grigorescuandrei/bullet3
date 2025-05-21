@@ -12,10 +12,25 @@
 #include "Bullet3Common/b3Scalar.h"
 #include "Bullet3OpenCL/Initialize/b3OpenCLUtils.h"
 
+// # Vulkan
+#include "vulkan/vulkan_core.h"
+#include "nvpsystem.hpp"
+#include <nvvk/context_vk.hpp>
+// TODO: maybe add this
+//#include "nvvk/commands_vk.hpp"
+#include <nvvk/raytraceKHR_vk.hpp>
+
 struct CommonOpenCLBase : public CommonExampleInterface
 {
 	struct GUIHelperInterface* m_guiHelper;
 	struct GpuDemoInternalData* m_clData;
+
+	VkInstance m_instance;
+	VkDevice m_device;
+	VkPhysicalDevice m_physicalDevice;
+	uint32_t m_graphicsQueueIndex; // actually contains graphics/compute/transfer
+	VkQueue m_queue;
+	VkCommandPool m_cmdPool;
 
 	CommonOpenCLBase(GUIHelperInterface* helper)
 		: m_guiHelper(helper),
@@ -70,6 +85,58 @@ struct CommonOpenCLBase : public CommonExampleInterface
 		}
 	}
 
+	virtual void initVulkan() {
+		// Vulkan required extensions
+		//assert(glfwVulkanSupported() == 1);
+		uint32_t count{0};
+
+		// Requesting Vulkan extensions and layers
+		nvvk::ContextCreateInfo contextInfo;
+		//contextInfo.verboseUsed = true;
+		contextInfo.setVersion(1, 2);                       // Using Vulkan 1.2
+		contextInfo.addInstanceLayer("VK_LAYER_LUNARG_monitor", true);              // FPS in titlebar
+		contextInfo.addInstanceExtension(VK_EXT_DEBUG_UTILS_EXTENSION_NAME, true);  // Allow debug names
+		//contextInfo.addDeviceExtension(VK_KHR_SURFACE_EXTENSION_NAME); /// (this is instance actually)
+		//contextInfo.addDeviceExtension(VK_KHR_SWAPCHAIN_EXTENSION_NAME);            // Enabling ability to present rendering
+
+		//requesting raytracing extensions
+		// #VKRay: Activate the ray tracing extension
+		VkPhysicalDeviceAccelerationStructureFeaturesKHR accelFeature{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR};
+		contextInfo.addDeviceExtension(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME, false, &accelFeature); // To build acceleration structures
+		VkPhysicalDeviceRayTracingPipelineFeaturesKHR rtPipelineFeature{};
+		rtPipelineFeature.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR;
+		contextInfo.addDeviceExtension(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME, false, &rtPipelineFeature); // To use vkCmdTraceRaysKHR
+		contextInfo.addDeviceExtension(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME); // Required by ray tracing pipeline
+
+		// Creating Vulkan base application
+		nvvk::Context vkctx{};
+		vkctx.initInstance(contextInfo);
+		// Find all compatible devices
+		auto compatibleDevices = vkctx.getCompatibleDevices(contextInfo);
+		assert(!compatibleDevices.empty());
+		// Use a compatible device
+		bool successful = vkctx.initDevice(compatibleDevices[0], contextInfo);
+		if (successful) {
+			b3Printf("Successfully initialized Vulkan device!\n");
+		}
+
+		setupVulkan(vkctx.m_instance, vkctx.m_device, vkctx.m_physicalDevice, vkctx.m_queueGCT.familyIndex);
+	}
+
+	void setupVulkan(const VkInstance& instance, const VkDevice& device, const VkPhysicalDevice& physicalDevice, uint32_t queueFamily) {
+		m_instance           = instance;
+		m_device             = device;
+		m_physicalDevice     = physicalDevice;
+		m_graphicsQueueIndex = queueFamily;
+		vkGetDeviceQueue(m_device, m_graphicsQueueIndex, 0, &m_queue);
+
+		VkCommandPoolCreateInfo poolCreateInfo{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
+		poolCreateInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+		vkCreateCommandPool(m_device, &poolCreateInfo, nullptr, &m_cmdPool);
+
+		// TODO: pipelinecachecreateinfo
+	}
+
 	virtual void exitCL()
 	{
 		if (m_clData && m_clData->m_clInitialized)
@@ -78,6 +145,10 @@ struct CommonOpenCLBase : public CommonExampleInterface
 			clReleaseContext(m_clData->m_clContext);
 			m_clData->m_clInitialized = false;
 		}
+	}
+
+	virtual void exitVulkan() {
+
 	}
 
 	virtual void renderScene()

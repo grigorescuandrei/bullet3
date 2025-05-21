@@ -25,6 +25,10 @@ struct b3GpuRaycastInternalData
 	cl_kernel m_raytracePairsKernel;
 	cl_kernel m_findRayRigidPairIndexRanges;
 
+	VkDevice mvk_device;
+	VkQueue mvk_queue;
+	VkCommandPool mvk_cmdPool;
+
 	b3GpuParallelLinearBvh* m_plbvh;
 	b3RadixSort32CL* m_radixSorter;
 	b3FillCL* m_fill;
@@ -42,7 +46,7 @@ struct b3GpuRaycastInternalData
 	int m_test;
 };
 
-b3GpuRaycast::b3GpuRaycast(cl_context ctx, cl_device_id device, cl_command_queue q)
+b3GpuRaycast::b3GpuRaycast(cl_context ctx, cl_device_id device, cl_command_queue q, VkDevice vk_device, VkQueue vk_queue, VkCommandPool vk_cmdPool)
 {
 	m_data = new b3GpuRaycastInternalData;
 	m_data->m_context = ctx;
@@ -51,6 +55,10 @@ b3GpuRaycast::b3GpuRaycast(cl_context ctx, cl_device_id device, cl_command_queue
 	m_data->m_raytraceKernel = 0;
 	m_data->m_raytracePairsKernel = 0;
 	m_data->m_findRayRigidPairIndexRanges = 0;
+
+	m_data->mvk_device = vk_device;
+	m_data->mvk_queue = vk_queue;
+	m_data->mvk_cmdPool = vk_cmdPool;
 
 	m_data->m_plbvh = new b3GpuParallelLinearBvh(ctx, device, q);
 	m_data->m_radixSorter = new b3RadixSort32CL(ctx, device, q);

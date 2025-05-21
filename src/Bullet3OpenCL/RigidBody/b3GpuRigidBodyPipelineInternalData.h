@@ -35,6 +35,10 @@ struct b3GpuRigidBodyPipelineInternalData
 	cl_device_id m_device;
 	cl_command_queue m_queue;
 
+	VkDevice mvk_device;
+	VkQueue mvk_queue;
+	VkCommandPool mvk_cmdPool;
+
 	cl_kernel m_integrateTransformsKernel;
 	cl_kernel m_updateAabbsKernel;
 	cl_kernel m_clearOverlappingPairsKernel;

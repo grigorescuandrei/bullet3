@@ -15,8 +15,8 @@
 #include "Bullet3OpenCL/NarrowphaseCollision/b3QuantizedBvh.h"
 #include "Bullet3Collision/NarrowPhaseCollision/b3ConvexUtility.h"
 
-b3GpuNarrowPhase::b3GpuNarrowPhase(cl_context ctx, cl_device_id device, cl_command_queue queue, const b3Config& config)
-	: m_data(0), m_planeBodyIndex(-1), m_static0Index(-1), m_context(ctx), m_device(device), m_queue(queue)
+b3GpuNarrowPhase::b3GpuNarrowPhase(cl_context ctx, cl_device_id device, cl_command_queue queue, VkDevice vk_device, VkQueue vk_queue, VkCommandPool vk_cmdPool, const b3Config& config)
+	: m_data(0), m_planeBodyIndex(-1), m_static0Index(-1), m_context(ctx), m_device(device), m_queue(queue), mvk_device(vk_device), mvk_queue(vk_queue), mvk_cmdPool(vk_cmdPool)
 {
 	m_data = new b3GpuNarrowPhaseInternalData();
 	m_data->m_currentContactBuffer = 0;

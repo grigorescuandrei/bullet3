@@ -22,6 +22,9 @@ subject to the following restrictions:
 #include "Bullet3Common/b3AlignedObjectArray.h"
 #include "Bullet3Collision/NarrowPhaseCollision/b3RaycastInfo.h"
 
+// # Vulkan
+#include "vulkan/vulkan_core.h"
+
 class b3GpuRigidBodyPipeline
 {
 protected:
@@ -30,7 +33,7 @@ protected:
 	int allocateCollidable();
 
 public:
-	b3GpuRigidBodyPipeline(cl_context ctx, cl_device_id device, cl_command_queue q, class b3GpuNarrowPhase* narrowphase, class b3GpuBroadphaseInterface* broadphaseSap, struct b3DynamicBvhBroadphase* broadphaseDbvt, const b3Config& config);
+	b3GpuRigidBodyPipeline(cl_context ctx, cl_device_id device, cl_command_queue q, VkDevice vk_device, VkQueue vk_queue, VkCommandPool vk_cmdPool, class b3GpuNarrowPhase* narrowphase, class b3GpuBroadphaseInterface* broadphaseSap, struct b3DynamicBvhBroadphase* broadphaseDbvt, const b3Config& config);
 	virtual ~b3GpuRigidBodyPipeline();
 
 	void stepSimulation(float deltaTime);
