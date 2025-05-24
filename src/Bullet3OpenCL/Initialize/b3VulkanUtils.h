@@ -3,6 +3,10 @@
 #pragma once
 
 #include "vulkan/vulkan_core.h"
+#define GLM_ENABLE_EXPERIMENTAL
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/quaternion.hpp>
+#include <glm/gtx/quaternion.hpp>
 #include <nvvk/context_vk.hpp>
 #include "nvvk/raytraceKHR_vk.hpp"
 #include "nvvk/buffers_vk.hpp"
