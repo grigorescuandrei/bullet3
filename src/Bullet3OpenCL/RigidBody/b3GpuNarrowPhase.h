@@ -3,11 +3,9 @@
 
 #include "Bullet3Collision/NarrowPhaseCollision/shared/b3Collidable.h"
 #include "Bullet3OpenCL/Initialize/b3OpenCLInclude.h"
+#include "Bullet3OpenCL/Initialize/b3VulkanUtils.h"
 #include "Bullet3Common/b3AlignedObjectArray.h"
 #include "Bullet3Common/b3Vector3.h"
-
-// # Vulkan
-#include "vulkan/vulkan_core.h"
 
 class b3GpuNarrowPhase
 {
@@ -21,15 +19,15 @@ protected:
 	cl_device_id m_device;
 	cl_command_queue m_queue;
 
-	VkDevice mvk_device;
-	VkQueue mvk_queue;
-	VkCommandPool mvk_cmdPool;
+	b3VulkanContext m_vkContext;
 
 	int registerConvexHullShapeInternal(class b3ConvexUtility* convexPtr, b3Collidable& col);
 	int registerConcaveMeshShape(b3AlignedObjectArray<b3Vector3>* vertices, b3AlignedObjectArray<int>* indices, b3Collidable& col, const float* scaling);
 
+	nvvk::RaytracingBuilderKHR::BlasInput objectToVkGeometry(int convexDataIndex);
+
 public:
-	b3GpuNarrowPhase(cl_context vtx, cl_device_id dev, cl_command_queue q, VkDevice vk_device, VkQueue vk_queue, VkCommandPool vk_cmdPool, const struct b3Config& config);
+	b3GpuNarrowPhase(cl_context vtx, cl_device_id dev, cl_command_queue q, b3VulkanContext vkContext, const struct b3Config& config);
 
 	virtual ~b3GpuNarrowPhase(void);
 
@@ -49,6 +47,8 @@ public:
 	int registerRigidBody(int collidableIndex, float mass, const float* position, const float* orientation, const float* aabbMin, const float* aabbMax, bool writeToGpu);
 	void setObjectTransform(const float* position, const float* orientation, int bodyIndex);
 
+	void createBottomLevelAS();
+	void createTopLevelAS();
 	void writeAllBodiesToGpu();
 	void reset();
 	void readbackAllBodiesToCpu();

@@ -35,9 +35,7 @@ struct b3GpuRigidBodyPipelineInternalData
 	cl_device_id m_device;
 	cl_command_queue m_queue;
 
-	VkDevice mvk_device;
-	VkQueue mvk_queue;
-	VkCommandPool mvk_cmdPool;
+	b3VulkanContext m_vkContext;
 
 	cl_kernel m_integrateTransformsKernel;
 	cl_kernel m_updateAabbsKernel;

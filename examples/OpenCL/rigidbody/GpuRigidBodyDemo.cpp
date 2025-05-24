@@ -127,7 +127,7 @@ void GpuRigidBodyDemo::initPhysics()
 		m_data->m_config.m_maxBroadphasePairs = maxPairsPerBody * m_data->m_config.m_maxConvexBodies;
 		m_data->m_config.m_maxContactCapacity = m_data->m_config.m_maxBroadphasePairs;
 
-		b3GpuNarrowPhase* np = new b3GpuNarrowPhase(m_clData->m_clContext, m_clData->m_clDevice, m_clData->m_clQueue, m_device, m_queue, m_cmdPool, m_data->m_config);
+		b3GpuNarrowPhase* np = new b3GpuNarrowPhase(m_clData->m_clContext, m_clData->m_clDevice, m_clData->m_clQueue, m_vkContext, m_data->m_config);
 		b3GpuBroadphaseInterface* bp = 0;
 
 		if (useUniformGrid)
@@ -142,10 +142,12 @@ void GpuRigidBodyDemo::initPhysics()
 		m_data->m_bp = bp;
 		m_data->m_broadphaseDbvt = new b3DynamicBvhBroadphase(m_data->m_config.m_maxConvexBodies);
 
-		m_data->m_rigidBodyPipeline = new b3GpuRigidBodyPipeline(m_clData->m_clContext, m_clData->m_clDevice, m_clData->m_clQueue, m_device, m_queue, m_cmdPool, np, bp, m_data->m_broadphaseDbvt, m_data->m_config);
+		m_data->m_rigidBodyPipeline = new b3GpuRigidBodyPipeline(m_clData->m_clContext, m_clData->m_clDevice, m_clData->m_clQueue, m_vkContext, np, bp, m_data->m_broadphaseDbvt, m_data->m_config);
 
 		setupScene();
-
+		
+		np->createBottomLevelAS();
+		np->createTopLevelAS();
 		m_data->m_rigidBodyPipeline->writeAllInstancesToGpu();
 		np->writeAllBodiesToGpu();
 		bp->writeAabbsToGpu();

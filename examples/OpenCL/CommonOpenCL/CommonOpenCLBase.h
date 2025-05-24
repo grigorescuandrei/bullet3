@@ -11,6 +11,7 @@
 #include "GpuDemoInternalData.h"
 #include "Bullet3Common/b3Scalar.h"
 #include "Bullet3OpenCL/Initialize/b3OpenCLUtils.h"
+#include "Bullet3OpenCL/Initialize/b3VulkanUtils.h"
 
 // # Vulkan
 #include "vulkan/vulkan_core.h"
@@ -25,12 +26,9 @@ struct CommonOpenCLBase : public CommonExampleInterface
 	struct GUIHelperInterface* m_guiHelper;
 	struct GpuDemoInternalData* m_clData;
 
-	VkInstance m_instance;
-	VkDevice m_device;
-	VkPhysicalDevice m_physicalDevice;
-	uint32_t m_graphicsQueueIndex; // actually contains graphics/compute/transfer
-	VkQueue m_queue;
-	VkCommandPool m_cmdPool;
+	b3VulkanContext m_vkContext;
+	nvvk::ResourceAllocatorDma m_alloc; // TODO: may need to replace this without DMA
+	nvvk::RaytracingBuilderKHR m_rtBuilder;
 
 	CommonOpenCLBase(GUIHelperInterface* helper)
 		: m_guiHelper(helper),
@@ -120,19 +118,25 @@ struct CommonOpenCLBase : public CommonExampleInterface
 			b3Printf("Successfully initialized Vulkan device!\n");
 		}
 
-		setupVulkan(vkctx.m_instance, vkctx.m_device, vkctx.m_physicalDevice, vkctx.m_queueGCT.familyIndex);
+		//setupVulkan(vkctx.m_instance, vkctx.m_device, vkctx.m_physicalDevice, vkctx.m_queueGCT.familyIndex);
+		setupVulkan(vkctx);
 	}
 
-	void setupVulkan(const VkInstance& instance, const VkDevice& device, const VkPhysicalDevice& physicalDevice, uint32_t queueFamily) {
-		m_instance           = instance;
-		m_device             = device;
-		m_physicalDevice     = physicalDevice;
-		m_graphicsQueueIndex = queueFamily;
-		vkGetDeviceQueue(m_device, m_graphicsQueueIndex, 0, &m_queue);
-
+	void setupVulkan(const nvvk::Context& context) {
+		m_vkContext.m_instance = context.m_instance;
+		m_vkContext.m_device = context.m_device;
+		m_vkContext.m_physicalDevice = context.m_physicalDevice;
+		m_vkContext.m_queueIndex = context.m_queueGCT.familyIndex;
+		vkGetDeviceQueue(m_vkContext.m_device, m_vkContext.m_queueIndex, 0, &(m_vkContext.m_queue));
+		
 		VkCommandPoolCreateInfo poolCreateInfo{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
 		poolCreateInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-		vkCreateCommandPool(m_device, &poolCreateInfo, nullptr, &m_cmdPool);
+		vkCreateCommandPool(context.m_device, &poolCreateInfo, nullptr, &(m_vkContext.cmdPool));
+
+		m_alloc.init(m_vkContext.m_instance, m_vkContext.m_device, m_vkContext.m_physicalDevice);
+		m_vkContext.m_pAlloc = &m_alloc;
+		m_rtBuilder.setup(m_vkContext.m_device, m_vkContext.m_pAlloc, m_vkContext.m_queueIndex);
+		m_vkContext.m_pRtBuilder = &m_rtBuilder;
 
 		// TODO: pipelinecachecreateinfo
 	}

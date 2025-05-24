@@ -3,6 +3,7 @@
 
 #include "Bullet3Common/b3Vector3.h"
 #include "Bullet3OpenCL/Initialize/b3OpenCLInclude.h"
+#include "Bullet3OpenCL/Initialize/b3VulkanUtils.h"
 
 #include "Bullet3Common/b3AlignedObjectArray.h"
 #include "Bullet3Collision/NarrowPhaseCollision/b3RaycastInfo.h"
@@ -16,7 +17,7 @@ protected:
 	struct b3GpuRaycastInternalData* m_data;
 
 public:
-	b3GpuRaycast(cl_context ctx, cl_device_id device, cl_command_queue q, VkDevice vk_device, VkQueue vk_queue, VkCommandPool vk_cmdPool);
+	b3GpuRaycast(cl_context ctx, cl_device_id device, cl_command_queue q, b3VulkanContext vkContext);
 	virtual ~b3GpuRaycast();
 
 	void castRaysHost(const b3AlignedObjectArray<b3RayInfo>& raysIn, b3AlignedObjectArray<b3RayHit>& hitResults,

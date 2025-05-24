@@ -19,6 +19,7 @@ subject to the following restrictions:
 #include "kernels/updateAabbsKernel.h"
 
 #include "Bullet3OpenCL/Initialize/b3OpenCLUtils.h"
+#include "Bullet3OpenCL/Initialize/b3VulkanUtils.h"
 #include "b3GpuNarrowPhase.h"
 #include "Bullet3Geometry/b3AabbUtil.h"
 #include "Bullet3OpenCL/BroadphaseCollision/b3SapAabb.h"
@@ -62,7 +63,7 @@ bool gClearPairsOnGpu = true;
 #include "Bullet3Dynamics/shared/b3IntegrateTransforms.h"
 #include "Bullet3OpenCL/RigidBody/b3GpuNarrowPhaseInternalData.h"
 
-b3GpuRigidBodyPipeline::b3GpuRigidBodyPipeline(cl_context ctx, cl_device_id device, cl_command_queue q, VkDevice vk_device, VkQueue vk_queue, VkCommandPool vk_cmdPool, class b3GpuNarrowPhase* narrowphase, class b3GpuBroadphaseInterface* broadphaseSap, struct b3DynamicBvhBroadphase* broadphaseDbvt, const b3Config& config)
+b3GpuRigidBodyPipeline::b3GpuRigidBodyPipeline(cl_context ctx, cl_device_id device, cl_command_queue q, b3VulkanContext vkContext, class b3GpuNarrowPhase* narrowphase, class b3GpuBroadphaseInterface* broadphaseSap, struct b3DynamicBvhBroadphase* broadphaseDbvt, const b3Config& config)
 {
 	m_data = new b3GpuRigidBodyPipelineInternalData;
 	m_data->m_constraintUid = 0;
@@ -71,9 +72,7 @@ b3GpuRigidBodyPipeline::b3GpuRigidBodyPipeline(cl_context ctx, cl_device_id devi
 	m_data->m_device = device;
 	m_data->m_queue = q;
 
-	m_data->mvk_device = vk_device;
-	m_data->mvk_queue = vk_queue;
-	m_data->mvk_cmdPool = vk_cmdPool;
+	m_data->m_vkContext = vkContext;
 
 	m_data->m_solver = new b3PgsJacobiSolver(true);                            //new b3PgsJacobiSolver(true);
 	m_data->m_gpuSolver = new b3GpuPgsConstraintSolver(ctx, device, q, true);  //new b3PgsJacobiSolver(true);
@@ -88,7 +87,7 @@ b3GpuRigidBodyPipeline::b3GpuRigidBodyPipeline(cl_context ctx, cl_device_id devi
 
 	m_data->m_solver2 = new b3GpuPgsContactSolver(ctx, device, q, config.m_maxBroadphasePairs);
 
-	m_data->m_raycaster = new b3GpuRaycast(ctx, device, q, vk_device, vk_queue, vk_cmdPool);
+	m_data->m_raycaster = new b3GpuRaycast(ctx, device, q, vkContext);
 
 	m_data->m_broadphaseDbvt = broadphaseDbvt;
 	m_data->m_broadphaseSap = broadphaseSap;

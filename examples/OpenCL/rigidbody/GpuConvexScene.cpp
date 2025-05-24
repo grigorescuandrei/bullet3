@@ -114,7 +114,7 @@ b3Vector4 colors[4] =
 
 void GpuConvexScene::setupScene()
 {
-	m_raycaster = new b3GpuRaycast(m_clData->m_clContext, m_clData->m_clDevice, m_clData->m_clQueue);
+	m_raycaster = new b3GpuRaycast(m_clData->m_clContext, m_clData->m_clDevice, m_clData->m_clQueue, m_vkContext);
 
 	int index = 0;
 	createStaticEnvironment();
@@ -221,7 +221,7 @@ int GpuConvexScene::createDynamicsObjects2(const float* vertices, int numVertice
 				verts.push_back(b3MakeVector3(vertex[0] * scaling[0], vertex[1] * scaling[1], vertex[2] * scaling[2]));
 			}
 
-			bool merge = true;
+			bool merge = false;
 			if (numVertices)
 			{
 				utilPtr->initializePolyhedralFeatures(&verts[0], verts.size(), merge);
@@ -274,7 +274,7 @@ int GpuConvexScene::createDynamicsObjects2(const float* vertices, int numVertice
 				}
 			}
 		}
-		delete utilPtr;
+		//delete utilPtr;
 	}
 	return index;
 }

@@ -15,8 +15,8 @@
 #include "Bullet3OpenCL/NarrowphaseCollision/b3QuantizedBvh.h"
 #include "Bullet3Collision/NarrowPhaseCollision/b3ConvexUtility.h"
 
-b3GpuNarrowPhase::b3GpuNarrowPhase(cl_context ctx, cl_device_id device, cl_command_queue queue, VkDevice vk_device, VkQueue vk_queue, VkCommandPool vk_cmdPool, const b3Config& config)
-	: m_data(0), m_planeBodyIndex(-1), m_static0Index(-1), m_context(ctx), m_device(device), m_queue(queue), mvk_device(vk_device), mvk_queue(vk_queue), mvk_cmdPool(vk_cmdPool)
+b3GpuNarrowPhase::b3GpuNarrowPhase(cl_context ctx, cl_device_id device, cl_command_queue queue, b3VulkanContext vkContext, const b3Config& config)
+	: m_data(0), m_planeBodyIndex(-1), m_static0Index(-1), m_context(ctx), m_device(device), m_queue(queue), m_vkContext(vkContext)
 {
 	m_data = new b3GpuNarrowPhaseInternalData();
 	m_data->m_currentContactBuffer = 0;
@@ -80,6 +80,9 @@ b3GpuNarrowPhase::b3GpuNarrowPhase(cl_context ctx, cl_device_id device, cl_comma
 
 	m_data->m_convexData->resize(config.m_maxConvexShapes);
 	m_data->m_convexPolyhedra.resize(config.m_maxConvexShapes);
+
+	m_data->m_vertexBuffersGPU = std::vector<nvvk::Buffer>();
+	m_data->m_indexBuffersGPU = std::vector<nvvk::Buffer>();
 
 	m_data->m_numAcceleratedShapes = 0;
 	m_data->m_numAcceleratedRigidBodies = 0;
@@ -314,8 +317,92 @@ int b3GpuNarrowPhase::registerConvexHullShape(const float* vertices, int strideI
 	}
 
 	int collidableIndex = registerConvexHullShape(utilPtr);
-	delete utilPtr;
+	//delete utilPtr;
 	return collidableIndex;
+}
+
+nvvk::RaytracingBuilderKHR::BlasInput b3GpuNarrowPhase::objectToVkGeometry(int modelIndex) {
+	const b3ConvexUtility* model = (m_data->m_convexData)->at(modelIndex);
+	int nbVertices = model->m_vertices.size();
+	std::vector<b3Vector3> m_vertices(nbVertices);
+	int i;
+	for (i = 0; i < nbVertices; ++i) {
+		const b3Vector3& vertex = model->m_vertices.at(i);
+		m_vertices.push_back(vertex);
+	}
+
+	int nbFaces = model->m_faces.size();
+	std::vector<int> m_indices(nbFaces * 3); // initial capacity is a lower-bound estimation
+	int f;
+	for (f = 0; f < nbFaces; ++f) {
+		const b3MyFace& face = model->m_faces[f];
+		const auto& faceIndices = face.m_indices;
+		const int nbFaceIndices = faceIndices.size();
+		// triangle-fan decomposition of polygons starting from vertex 0
+		// less ideal the more indices there are over 4
+		// also less ideal in quadrilateral case if far from a square (elongated)
+		for (i = 1; i < nbFaceIndices - 1; ++i) {
+			m_indices.push_back(faceIndices[0]);
+			m_indices.push_back(faceIndices[i]);
+			m_indices.push_back(faceIndices[i + 1]);
+		}
+	}
+	int nbIndices = m_indices.size();
+
+	//// Create the buffers on Device and copy vertices/indices
+	nvvk::CommandPool cmdBufGet(m_vkContext.m_device, m_vkContext.m_queueIndex);
+	VkCommandBuffer cmdBuf = cmdBufGet.createCommandBuffer();
+
+	VkBufferUsageFlags flag = VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+	VkBufferUsageFlags rayTracingFlags = // used also for building acceleration structures
+		flag | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+	
+	nvvk::Buffer vertexBuffer = (m_vkContext.m_pAlloc)->createBuffer(cmdBuf, m_vertices, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | rayTracingFlags);
+	nvvk::Buffer indexBuffer = (m_vkContext.m_pAlloc)->createBuffer(cmdBuf, m_indices, VK_BUFFER_USAGE_INDEX_BUFFER_BIT | rayTracingFlags);
+
+	m_data->m_vertexBuffersGPU.emplace_back(vertexBuffer);
+	m_data->m_indexBuffersGPU.emplace_back(indexBuffer);
+
+	cmdBufGet.submitAndWait(cmdBuf);
+	(m_vkContext.m_pAlloc)->finalizeAndReleaseStaging();
+
+	// BLAS builder requires raw device addresses.
+	VkDeviceAddress vertexAddress = nvvk::getBufferDeviceAddress(m_vkContext.m_device, vertexBuffer.buffer);
+	VkDeviceAddress indexAddress  = nvvk::getBufferDeviceAddress(m_vkContext.m_device, indexBuffer.buffer);
+
+	uint32_t maxPrimitiveCount = nbIndices / 3;
+
+	// Describe buffer as array of VertexObj.
+	VkAccelerationStructureGeometryTrianglesDataKHR triangles{VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR};
+	triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT; // vec3 vertex position data.
+	triangles.vertexData.deviceAddress = vertexAddress;
+	triangles.vertexStride             = sizeof(b3Vector3);
+	// Describe index data (32-bit unsigned int)
+	triangles.indexType = VK_INDEX_TYPE_UINT32;
+	triangles.indexData.deviceAddress = indexAddress;
+	// Indicate identity transform by setting transformData to null device pointer.
+	//triangles.transformData = {};
+	triangles.maxVertex = nbVertices - 1;
+
+	// Identify the above data as containing opaque triangles.
+	VkAccelerationStructureGeometryKHR asGeom{VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR};
+	asGeom.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
+	asGeom.flags        = VK_GEOMETRY_OPAQUE_BIT_KHR;
+	asGeom.geometry.triangles = triangles;
+
+	// The entire array will be used to build the BLAS.
+	VkAccelerationStructureBuildRangeInfoKHR offset;
+	offset.firstVertex = 0;
+	offset.primitiveCount = maxPrimitiveCount;
+	offset.primitiveOffset = 0;
+	offset.transformOffset = 0;
+
+	// Our blas is made from only one geometry, but could be made of many geometries
+	nvvk::RaytracingBuilderKHR::BlasInput input;
+	input.asGeometry.emplace_back(asGeom);
+	input.asBuildOffsetInfo.emplace_back(offset);
+
+	return input;
 }
 
 int b3GpuNarrowPhase::registerConvexHullShape(b3ConvexUtility* utilPtr)
@@ -910,6 +997,31 @@ int b3GpuNarrowPhase::registerRigidBody(int collidableIndex, float mass, const f
 int b3GpuNarrowPhase::getNumRigidBodies() const
 {
 	return m_data->m_numAcceleratedRigidBodies;
+}
+
+void b3GpuNarrowPhase::createBottomLevelAS() {
+	const auto& convexUtilities = m_data->m_convexData;
+	const int nbConvexUtilities = convexUtilities->size();
+	std::vector<nvvk::RaytracingBuilderKHR::BlasInput> allBlas;
+	allBlas.reserve(nbConvexUtilities);
+
+	int i;
+	for (i = 0; i < nbConvexUtilities; ++i) {
+		b3ConvexUtility*& convexUtility = convexUtilities->at(i);
+		auto blas = objectToVkGeometry(i);
+		allBlas.emplace_back(blas);
+		if (convexUtility != nullptr)
+			delete convexUtility;
+	}
+
+	(m_vkContext.m_pRtBuilder)->buildBlas(allBlas, VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR);
+
+	m_data->m_vertexBuffersGPU.clear();
+	m_data->m_indexBuffersGPU.clear();
+}
+
+void b3GpuNarrowPhase::createTopLevelAS() {
+
 }
 
 void b3GpuNarrowPhase::writeAllBodiesToGpu()

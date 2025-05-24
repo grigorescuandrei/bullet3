@@ -26,6 +26,9 @@ struct b3GpuNarrowPhaseInternalData
 {
 	b3AlignedObjectArray<b3ConvexUtility*>* m_convexData;
 
+	std::vector<nvvk::Buffer> m_vertexBuffersGPU;
+	std::vector<nvvk::Buffer> m_indexBuffersGPU;
+
 	b3AlignedObjectArray<b3ConvexPolyhedronData> m_convexPolyhedra;
 	b3AlignedObjectArray<b3Vector3> m_uniqueEdges;
 	b3AlignedObjectArray<b3Vector3> m_convexVertices;
