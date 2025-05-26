@@ -1015,7 +1015,11 @@ void b3GpuNarrowPhase::createBottomLevelAS() {
 	}
 
 	(m_vkContext.m_pRtBuilder)->buildBlas(allBlas, VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR);
-
+	
+	for (i = 0; i < nbConvexUtilities; ++i) {
+		m_vkContext.m_pAlloc->destroy(m_data->m_vertexBuffersGPU[i]);
+		m_vkContext.m_pAlloc->destroy(m_data->m_indexBuffersGPU[i]);
+	}
 	m_data->m_vertexBuffersGPU.clear();
 	m_data->m_indexBuffersGPU.clear();
 }

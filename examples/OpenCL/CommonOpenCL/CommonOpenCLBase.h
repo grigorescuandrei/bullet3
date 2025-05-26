@@ -126,7 +126,7 @@ struct CommonOpenCLBase : public CommonExampleInterface
 		m_vkContext.m_instance = context.m_instance;
 		m_vkContext.m_device = context.m_device;
 		m_vkContext.m_physicalDevice = context.m_physicalDevice;
-		m_vkContext.m_queueIndex = context.m_queueGCT.familyIndex;
+		m_vkContext.m_queueIndex = context.m_queueC.familyIndex;
 		vkGetDeviceQueue(m_vkContext.m_device, m_vkContext.m_queueIndex, 0, &(m_vkContext.m_queue));
 		
 		VkCommandPoolCreateInfo poolCreateInfo{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
@@ -152,7 +152,8 @@ struct CommonOpenCLBase : public CommonExampleInterface
 	}
 
 	virtual void exitVulkan() {
-
+		m_vkContext.m_pRtBuilder->destroy();
+		m_vkContext.m_pAlloc->deinit();
 	}
 
 	virtual void renderScene()
