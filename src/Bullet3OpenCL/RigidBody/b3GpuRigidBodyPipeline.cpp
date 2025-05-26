@@ -677,4 +677,8 @@ void b3GpuRigidBodyPipeline::castRays(const b3AlignedObjectArray<b3RayInfo>& ray
 										getNumBodies(), this->m_data->m_narrowphase->getBodiesCpu(),
 										m_data->m_narrowphase->getNumCollidablesGpu(), m_data->m_narrowphase->getCollidablesCpu(),
 										m_data->m_narrowphase->getInternalData(), m_data->m_broadphaseSap);
+	this->m_data->m_raycaster->castRaysVk(rays, hitResults,
+										getNumBodies(), this->m_data->m_narrowphase->getBodiesCpu(),
+										m_data->m_narrowphase->getNumCollidablesGpu(), m_data->m_narrowphase->getCollidablesCpu(),
+										m_data->m_narrowphase->getInternalData(), m_data->m_broadphaseSap);
 }

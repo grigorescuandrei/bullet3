@@ -3,13 +3,13 @@
 
 #include "Bullet3Common/b3Vector3.h"
 #include "Bullet3OpenCL/Initialize/b3OpenCLInclude.h"
-#include "Bullet3OpenCL/Initialize/b3VulkanUtils.h"
 
 #include "Bullet3Common/b3AlignedObjectArray.h"
 #include "Bullet3Collision/NarrowPhaseCollision/b3RaycastInfo.h"
 
 // # Vulkan
-#include "vulkan/vulkan_core.h"
+#include "Bullet3OpenCL/Initialize/b3VulkanUtils.h"
+#include "nvh/fileoperations.hpp"
 
 class b3GpuRaycast
 {
@@ -23,6 +23,10 @@ public:
 	void castRaysHost(const b3AlignedObjectArray<b3RayInfo>& raysIn, b3AlignedObjectArray<b3RayHit>& hitResults,
 					  int numBodies, const struct b3RigidBodyData* bodies, int numCollidables, const struct b3Collidable* collidables,
 					  const struct b3GpuNarrowPhaseInternalData* narrowphaseData);
+
+	void castRaysVk(const b3AlignedObjectArray<b3RayInfo>& rays, b3AlignedObjectArray<b3RayHit>& hitResults,
+				  int numBodies, const struct b3RigidBodyData* bodies, int numCollidables, const struct b3Collidable* collidables,
+				  const struct b3GpuNarrowPhaseInternalData* narrowphaseData, class b3GpuBroadphaseInterface* broadphase);
 
 	void castRays(const b3AlignedObjectArray<b3RayInfo>& rays, b3AlignedObjectArray<b3RayHit>& hitResults,
 				  int numBodies, const struct b3RigidBodyData* bodies, int numCollidables, const struct b3Collidable* collidables,

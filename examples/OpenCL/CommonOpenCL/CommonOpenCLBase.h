@@ -128,6 +128,9 @@ struct CommonOpenCLBase : public CommonExampleInterface
 		m_vkContext.m_physicalDevice = context.m_physicalDevice;
 		m_vkContext.m_queueIndex = context.m_queueC.familyIndex;
 		vkGetDeviceQueue(m_vkContext.m_device, m_vkContext.m_queueIndex, 0, &(m_vkContext.m_queue));
+
+		// debug utils
+        m_vkContext.setupDebugMessenger();
 		
 		VkCommandPoolCreateInfo poolCreateInfo{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
 		poolCreateInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;

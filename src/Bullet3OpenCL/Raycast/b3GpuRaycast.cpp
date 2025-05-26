@@ -26,6 +26,10 @@ struct b3GpuRaycastInternalData
 	cl_kernel m_findRayRigidPairIndexRanges;
 
 	b3VulkanContext m_vkContext;
+	VkPipeline m_pipeline;
+	VkPipelineLayout m_pipelineLayout;
+	VkDescriptorSetLayout m_descriptorSetLayout;
+	VkShaderModule m_shader_module;
 
 	b3GpuParallelLinearBvh* m_plbvh;
 	b3RadixSort32CL* m_radixSorter;
@@ -55,6 +59,79 @@ b3GpuRaycast::b3GpuRaycast(cl_context ctx, cl_device_id device, cl_command_queue
 	m_data->m_findRayRigidPairIndexRanges = 0;
 
 	m_data->m_vkContext = vkContext;
+
+	auto shader = nvh::loadFile("vk_raycast_comp.spv", true, {SHADERS_PATH}, true);
+	VkShaderModuleCreateInfo shaderModuleCreateInfo = {
+        VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,      // VkStructureType              sType;
+        0,                                                // const void*                  pNext;
+        0,                                                // VkShaderModuleCreateFlags    flags;
+        shader.size(),                                    // size_t                       codeSize;
+        reinterpret_cast<const uint32_t*>(shader.data())  // const uint32_t*              pCode;
+    };
+
+	if (vkCreateShaderModule(vkContext.m_device, &shaderModuleCreateInfo, 0, &(m_data->m_shader_module)) != VK_SUCCESS) {
+		b3Error("failed to create raycast shader module!");
+	}
+
+    VkDescriptorSetLayoutBinding descriptorSetLayoutBindings[1] = {
+        {
+            0,												// uint32_t              binding;
+            VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR,  // VkDescriptorType      descriptorType;
+            1,												// uint32_t              descriptorCount;
+            VK_SHADER_STAGE_COMPUTE_BIT,					// VkShaderStageFlags    stageFlags;
+            0												// const VkSampler*      pImmutableSamplers;
+        }
+    };
+
+    VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo = {
+        VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,  // VkStructureType                        sType;
+        0,                                                    // const void*                            pNext;
+        0,                                                    // VkDescriptorSetLayoutCreateFlags       flags;
+        1,                                                    // uint32_t                               bindingCount;
+        descriptorSetLayoutBindings                           // const VkDescriptorSetLayoutBinding*    pBindings;
+    };
+
+	if (vkCreateDescriptorSetLayout(vkContext.m_device, &descriptorSetLayoutCreateInfo, 0, &(m_data->m_descriptorSetLayout)) != VK_SUCCESS) {
+		b3Error("failed to create raycast descriptor set layout");
+	}
+
+	// add pushConstantsRange here
+    VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = {
+        VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,  // VkStructureType                 sType;
+        0,                                              // const void*                     pNext;
+        0,                                              // VkPipelineLayoutCreateFlags     flags;
+        1,                                              // uint32_t                        setLayoutCount;
+        &(m_data->m_descriptorSetLayout),               // const VkDescriptorSetLayout*    pSetLayouts;
+        0,                                              // uint32_t                        pushConstantRangeCount;
+        0                                               // const VkPushConstantRange*      pPushConstantRanges;
+    };
+
+	if (vkCreatePipelineLayout(vkContext.m_device, &pipelineLayoutCreateInfo, 0, &(m_data->m_pipelineLayout)) != VK_SUCCESS) {
+		b3Error("failed to create raycast pipeline layout");
+	}
+
+    VkComputePipelineCreateInfo computePipelineCreateInfo = {
+        VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO, // VkStructureType                    sType;
+        0,                                              // const void*                        pNext;
+        0,                                              // VkPipelineCreateFlags              flags;
+        {
+            // VkPipelineShaderStageCreateInfo    stage;
+            VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,  // VkStructureType                     sType;
+            0,                                                    // const void*                         pNext;
+            0,                                                    // VkPipelineShaderStageCreateFlags    flags;
+            VK_SHADER_STAGE_COMPUTE_BIT,                          // VkShaderStageFlagBits               stage;
+            m_data->m_shader_module,                              // VkShaderModule                      module;
+            "main",                                               // const char*                         pName;
+            0                                                     // const VkSpecializationInfo*         pSpecializationInfo;
+        },
+        m_data->m_pipelineLayout,                       // VkPipelineLayout                   layout;
+        0,                                              // VkPipeline                         basePipelineHandle;
+        0                                               // int32_t                            basePipelineIndex;
+    };
+
+    if (vkCreateComputePipelines(vkContext.m_device, 0, 1, &computePipelineCreateInfo, 0, &(m_data->m_pipeline)) != VK_SUCCESS) {
+		b3Error("failed to create raycast pipeline");
+	}
 
 	m_data->m_plbvh = new b3GpuParallelLinearBvh(ctx, device, q);
 	m_data->m_radixSorter = new b3RadixSort32CL(ctx, device, q);
@@ -86,6 +163,12 @@ b3GpuRaycast::~b3GpuRaycast()
 	clReleaseKernel(m_data->m_raytraceKernel);
 	clReleaseKernel(m_data->m_raytracePairsKernel);
 	clReleaseKernel(m_data->m_findRayRigidPairIndexRanges);
+
+	// TODO: clear raycast compute pipeline
+    vkDestroyPipeline(m_data->m_vkContext.m_device, m_data->m_pipeline, NULL);
+    vkDestroyPipelineLayout(m_data->m_vkContext.m_device, m_data->m_pipelineLayout, NULL);
+    vkDestroyDescriptorSetLayout(m_data->m_vkContext.m_device, m_data->m_descriptorSetLayout, NULL);
+    vkDestroyShaderModule(m_data->m_vkContext.m_device, m_data->m_shader_module, NULL);
 
 	delete m_data->m_plbvh;
 	delete m_data->m_radixSorter;
@@ -249,6 +332,83 @@ void b3GpuRaycast::castRaysHost(const b3AlignedObjectArray<b3RayInfo>& rays, b3A
 		}
 	}
 }
+
+void b3GpuRaycast::castRaysVk(const b3AlignedObjectArray<b3RayInfo>& rays, b3AlignedObjectArray<b3RayHit>& hitResults,
+	int numBodies, const struct b3RigidBodyData* bodies, int numCollidables, const struct b3Collidable* collidables,
+	const struct b3GpuNarrowPhaseInternalData* narrowphaseData, class b3GpuBroadphaseInterface* broadphase) {
+
+	int nbRays = rays.size();
+
+	VkDescriptorPoolSize descriptorPoolSize = {
+        VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR,  // VkDescriptorType    type;
+        1												// uint32_t            descriptorCount;
+    };
+
+    VkDescriptorPoolCreateInfo descriptorPoolCreateInfo = {
+        VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,  // VkStructureType                sType;
+        0,                                              // const void*                    pNext;
+        0,                                              // VkDescriptorPoolCreateFlags    flags;
+        1,                                              // uint32_t                       maxSets;
+        1,                                              // uint32_t                       poolSizeCount;
+        &descriptorPoolSize                             // const VkDescriptorPoolSize*    pPoolSizes;
+    };
+
+    VkDescriptorPool descriptorPool;
+	if (vkCreateDescriptorPool(m_data->m_vkContext.m_device, &descriptorPoolCreateInfo, 0, &descriptorPool) != VK_SUCCESS) {
+		b3Error("failed to create descriptor pool");
+	}
+
+    VkDescriptorSetAllocateInfo descriptorSetAllocateInfo = {
+        VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO, // VkStructureType                 sType;
+        0,                                              // const void*                     pNext;
+        descriptorPool,                                 // VkDescriptorPool                descriptorPool;
+        1,                                              // uint32_t                        descriptorSetCount;
+        &(m_data->m_descriptorSetLayout)                // const VkDescriptorSetLayout*    pSetLayouts;
+    };
+
+    VkDescriptorSet descriptorSet;
+    if (vkAllocateDescriptorSets(m_data->m_vkContext.m_device, &descriptorSetAllocateInfo, &descriptorSet) != VK_SUCCESS) {
+		b3Error("failed to create descriptor set");
+	}
+
+	auto tlas = m_data->m_vkContext.m_pRtBuilder->getAccelerationStructure();
+	VkWriteDescriptorSetAccelerationStructureKHR descASInfo{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR};
+	descASInfo.accelerationStructureCount = 1;
+	descASInfo.pAccelerationStructures    = &tlas;
+
+    VkWriteDescriptorSet writeDescriptorSet[1] = {
+        {
+            VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,			// VkStructureType                  sType;
+            &descASInfo,									// const void*                      pNext;
+            descriptorSet,									// VkDescriptorSet                  dstSet;
+            0,												// uint32_t                         dstBinding;
+            0,												// uint32_t                         dstArrayElement;
+            1,												// uint32_t                         descriptorCount;
+            VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR,	// VkDescriptorType                 descriptorType;
+            0,												// const VkDescriptorImageInfo*     pImageInfo;
+            0,												// const VkDescriptorBufferInfo*    pBufferInfo;
+            0												// const VkBufferView*              pTexelBufferView;
+        }
+    };
+
+    vkUpdateDescriptorSets(m_data->m_vkContext.m_device, 1, writeDescriptorSet, 0, 0);
+
+	// begin invocation of raycast compute shader
+	nvvk::CommandPool cmdBufGet(m_data->m_vkContext.m_device, m_data->m_vkContext.m_queueIndex);
+	VkCommandBuffer cmdBuf = cmdBufGet.createCommandBuffer();
+
+	vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, m_data->m_pipeline);
+
+	vkCmdBindDescriptorSets(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE,
+		m_data->m_pipelineLayout, 0, 1, &descriptorSet, 0, 0);
+
+	vkCmdDispatch(cmdBuf, nbRays, 1, 1);
+
+	cmdBufGet.submitAndWait(cmdBuf);
+
+	vkDestroyDescriptorPool(m_data->m_vkContext.m_device, descriptorPool, NULL);
+}
+
 ///todo: add some acceleration structure (AABBs, tree etc)
 void b3GpuRaycast::castRays(const b3AlignedObjectArray<b3RayInfo>& rays, b3AlignedObjectArray<b3RayHit>& hitResults,
 							int numBodies, const struct b3RigidBodyData* bodies, int numCollidables, const struct b3Collidable* collidables,
