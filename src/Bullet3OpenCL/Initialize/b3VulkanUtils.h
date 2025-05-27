@@ -8,9 +8,10 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <glm/gtx/quaternion.hpp>
-#include <nvvk/context_vk.hpp>
+#include "nvvk/context_vk.hpp"
 #include "nvvk/raytraceKHR_vk.hpp"
 #include "nvvk/buffers_vk.hpp"
+#include "nvvk/resourceallocator_vk.hpp"
 #include <iostream>
 
 #define SHADERS_PATH "C:\\facultate\\hpc4\\project\\bullet3\\src\\Bullet3OpenCL\\Raycast\\shaders"

@@ -1,1 +1,1 @@
-"C:/VulkanSDK/1.4.309.0/Bin/glslc.exe" ".\src\Bullet3OpenCL\Raycast\shaders\vk_raycast.comp" -o ".\src\Bullet3OpenCl\Raycast\shaders\vk_raycast_comp.spv"
+"C:/VulkanSDK/1.4.309.0/Bin/glslc.exe" ".\src\Bullet3OpenCL\Raycast\shaders\vk_raycast.comp" -o ".\src\Bullet3OpenCl\Raycast\shaders\vk_raycast_comp.spv" --target-spv=spv1.4

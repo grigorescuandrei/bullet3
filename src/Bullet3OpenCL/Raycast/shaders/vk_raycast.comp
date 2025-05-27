@@ -2,7 +2,52 @@
 #extension GL_EXT_ray_tracing : enable
 #extension GL_EXT_ray_query : enable
 
+struct RayInfo {
+	vec3 m_from;
+	vec3 m_to;
+};
+
+struct RayHit {
+	float m_hitFraction;
+	int m_hitBody;
+	int m_hitResult1;
+	int m_hitResult2;
+	vec3 m_hitPoint;
+	vec3 m_hitNormal;
+};
+
+layout(set = 0, binding = 0) uniform accelerationStructureEXT topLevelAS;
+
+layout(set = 0, binding = 1) readonly buffer RayInfoBuffer {
+    RayInfo rays[];
+};
+
+layout(set = 0, binding = 2) writeonly buffer RayHitBuffer {
+	RayHit rayHits[];
+};
 
 void main() {
+
+    uint index = gl_GlobalInvocationID.x;
+
+	RayInfo ray = rays[index];
+	vec3 origin = ray.m_from;
+	vec3 direction = ray.m_to - ray.m_from;
+
+	float tMin      = 0.01f;
+	float tMax      = 10000.1f;
 	
+	rayQueryEXT rayQuery;
+	rayQueryInitializeEXT(rayQuery, topLevelAS, gl_RayFlagsTerminateOnFirstHitEXT, 0xFF, origin, tMin, direction, tMax);
+
+	// Start traversal: return false if traversal is complete
+	while(rayQueryProceedEXT(rayQuery)) {}
+
+	// Returns type of committed (true) intersection
+	if(rayQueryGetIntersectionTypeEXT(rayQuery, true) != gl_RayQueryCommittedIntersectionNoneEXT) {
+		// Got an intersection
+		int hitBodyIndex = rayQueryGetIntersectionInstanceIdEXT(rayQuery, true);
+		rayHits[index].m_hitBody = hitBodyIndex;
+		rayHits[index].m_hitFraction = 0.9f;
+	}
 }

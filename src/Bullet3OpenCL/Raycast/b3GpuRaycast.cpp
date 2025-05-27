@@ -73,21 +73,35 @@ b3GpuRaycast::b3GpuRaycast(cl_context ctx, cl_device_id device, cl_command_queue
 		b3Error("failed to create raycast shader module!");
 	}
 
-    VkDescriptorSetLayoutBinding descriptorSetLayoutBindings[1] = {
+    VkDescriptorSetLayoutBinding descriptorSetLayoutBindings[3] = {
         {
             0,												// uint32_t              binding;
             VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR,  // VkDescriptorType      descriptorType;
             1,												// uint32_t              descriptorCount;
             VK_SHADER_STAGE_COMPUTE_BIT,					// VkShaderStageFlags    stageFlags;
             0												// const VkSampler*      pImmutableSamplers;
-        }
+        },
+		{
+			1,
+			VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+			1,
+			VK_SHADER_STAGE_COMPUTE_BIT,
+			0
+		},
+		{
+			2,
+			VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+			1,
+			VK_SHADER_STAGE_COMPUTE_BIT,
+			0
+		}
     };
 
     VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo = {
         VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,  // VkStructureType                        sType;
         0,                                                    // const void*                            pNext;
         0,                                                    // VkDescriptorSetLayoutCreateFlags       flags;
-        1,                                                    // uint32_t                               bindingCount;
+        3,                                                    // uint32_t                               bindingCount;
         descriptorSetLayoutBindings                           // const VkDescriptorSetLayoutBinding*    pBindings;
     };
 
@@ -338,10 +352,17 @@ void b3GpuRaycast::castRaysVk(const b3AlignedObjectArray<b3RayInfo>& rays, b3Ali
 	const struct b3GpuNarrowPhaseInternalData* narrowphaseData, class b3GpuBroadphaseInterface* broadphase) {
 
 	int nbRays = rays.size();
+	nvvk::ResourceAllocatorDma& m_alloc = *(m_data->m_vkContext.m_pAlloc);
 
-	VkDescriptorPoolSize descriptorPoolSize = {
-        VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR,  // VkDescriptorType    type;
-        1												// uint32_t            descriptorCount;
+	VkDescriptorPoolSize descriptorPoolSize[2] = {
+		{
+			VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR,  // VkDescriptorType    type;
+			1												// uint32_t            descriptorCount;
+		},
+		{
+			VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+			2
+		}
     };
 
     VkDescriptorPoolCreateInfo descriptorPoolCreateInfo = {
@@ -349,8 +370,8 @@ void b3GpuRaycast::castRaysVk(const b3AlignedObjectArray<b3RayInfo>& rays, b3Ali
         0,                                              // const void*                    pNext;
         0,                                              // VkDescriptorPoolCreateFlags    flags;
         1,                                              // uint32_t                       maxSets;
-        1,                                              // uint32_t                       poolSizeCount;
-        &descriptorPoolSize                             // const VkDescriptorPoolSize*    pPoolSizes;
+        2,                                              // uint32_t                       poolSizeCount;
+        descriptorPoolSize                              // const VkDescriptorPoolSize*    pPoolSizes;
     };
 
     VkDescriptorPool descriptorPool;
@@ -371,12 +392,40 @@ void b3GpuRaycast::castRaysVk(const b3AlignedObjectArray<b3RayInfo>& rays, b3Ali
 		b3Error("failed to create descriptor set");
 	}
 
+	// begin invocation of raycast compute shader
+	nvvk::CommandPool cmdBufGet(m_data->m_vkContext.m_device, m_data->m_vkContext.m_queueIndex);
+	VkCommandBuffer cmdBuf = cmdBufGet.createCommandBuffer();
+
 	auto tlas = m_data->m_vkContext.m_pRtBuilder->getAccelerationStructure();
 	VkWriteDescriptorSetAccelerationStructureKHR descASInfo{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR};
 	descASInfo.accelerationStructureCount = 1;
 	descASInfo.pAccelerationStructures    = &tlas;
 
-    VkWriteDescriptorSet writeDescriptorSet[1] = {
+	auto flag = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+	std::vector<b3RayInfo> raysVector(nbRays);
+	std::vector<b3RayHit> hitsVector(nbRays);
+	int i;
+	for (i = 0; i < nbRays; ++i) {
+		raysVector.push_back(rays.at(i));
+		hitsVector.push_back(b3RayHit());
+	}
+
+	nvvk::Buffer rayInfoBuffer = m_alloc.createBuffer(cmdBuf, raysVector, flag);
+	nvvk::Buffer rayHitBuffer = m_alloc.createBuffer(cmdBuf, hitsVector, flag);
+
+    VkDescriptorBufferInfo in_descriptorBufferInfo = {
+        rayInfoBuffer.buffer,
+        0,            // VkDeviceSize    offset;
+        VK_WHOLE_SIZE // VkDeviceSize    range;
+    };
+
+    VkDescriptorBufferInfo out_descriptorBufferInfo = {
+        rayHitBuffer.buffer,
+        0,             // VkDeviceSize    offset;
+        VK_WHOLE_SIZE  // VkDeviceSize    range;
+    };
+
+    VkWriteDescriptorSet writeDescriptorSet[3] = {
         {
             VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,			// VkStructureType                  sType;
             &descASInfo,									// const void*                      pNext;
@@ -388,14 +437,34 @@ void b3GpuRaycast::castRaysVk(const b3AlignedObjectArray<b3RayInfo>& rays, b3Ali
             0,												// const VkDescriptorImageInfo*     pImageInfo;
             0,												// const VkDescriptorBufferInfo*    pBufferInfo;
             0												// const VkBufferView*              pTexelBufferView;
+        },
+        {
+            VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, // VkStructureType                  sType;
+            0,                                      // const void*                      pNext;
+            descriptorSet,                          // VkDescriptorSet                  dstSet;
+            1,                                      // uint32_t                         dstBinding;
+            0,                                      // uint32_t                         dstArrayElement;
+            1,                                      // uint32_t                         descriptorCount;
+            VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,      // VkDescriptorType                 descriptorType;
+            0,                                      // const VkDescriptorImageInfo*     pImageInfo;
+            &in_descriptorBufferInfo,               // const VkDescriptorBufferInfo*    pBufferInfo;
+            0                                       // const VkBufferView*              pTexelBufferView;
+        },
+        {
+            VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, // VkStructureType                  sType;
+            0,                                      // const void*                      pNext;
+            descriptorSet,                          // VkDescriptorSet                  dstSet;
+            2,                                      // uint32_t                         dstBinding;
+            0,                                      // uint32_t                         dstArrayElement;
+            1,                                      // uint32_t                         descriptorCount;
+            VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,      // VkDescriptorType                 descriptorType;
+            0,                                      // const VkDescriptorImageInfo*     pImageInfo;
+            &out_descriptorBufferInfo,              // const VkDescriptorBufferInfo*    pBufferInfo;
+            0                                       // const VkBufferView*              pTexelBufferView;
         }
     };
 
-    vkUpdateDescriptorSets(m_data->m_vkContext.m_device, 1, writeDescriptorSet, 0, 0);
-
-	// begin invocation of raycast compute shader
-	nvvk::CommandPool cmdBufGet(m_data->m_vkContext.m_device, m_data->m_vkContext.m_queueIndex);
-	VkCommandBuffer cmdBuf = cmdBufGet.createCommandBuffer();
+    vkUpdateDescriptorSets(m_data->m_vkContext.m_device, 3, writeDescriptorSet, 0, 0);
 
 	vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, m_data->m_pipeline);
 
@@ -405,7 +474,10 @@ void b3GpuRaycast::castRaysVk(const b3AlignedObjectArray<b3RayInfo>& rays, b3Ali
 	vkCmdDispatch(cmdBuf, nbRays, 1, 1);
 
 	cmdBufGet.submitAndWait(cmdBuf);
+	m_alloc.finalizeAndReleaseStaging();
 
+	m_alloc.destroy(rayInfoBuffer);
+	m_alloc.destroy(rayHitBuffer);
 	vkDestroyDescriptorPool(m_data->m_vkContext.m_device, descriptorPool, NULL);
 }
 
