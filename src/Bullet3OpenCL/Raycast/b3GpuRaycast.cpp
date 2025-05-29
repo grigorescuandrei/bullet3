@@ -402,8 +402,10 @@ void b3GpuRaycast::castRaysVk(const b3AlignedObjectArray<b3RayInfo>& rays, b3Ali
 	descASInfo.pAccelerationStructures    = &tlas;
 
 	auto flag = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
-	std::vector<b3RayInfo> raysVector(nbRays);
-	std::vector<b3RayHit> hitsVector(nbRays);
+	std::vector<b3RayInfo> raysVector;
+	std::vector<b3RayHit> hitsVector;
+	raysVector.reserve(nbRays);
+	hitsVector.reserve(nbRays);
 	int i;
 	for (i = 0; i < nbRays; ++i) {
 		raysVector.push_back(rays.at(i));
@@ -411,7 +413,10 @@ void b3GpuRaycast::castRaysVk(const b3AlignedObjectArray<b3RayInfo>& rays, b3Ali
 	}
 
 	nvvk::Buffer rayInfoBuffer = m_alloc.createBuffer(cmdBuf, raysVector, flag);
-	nvvk::Buffer rayHitBuffer = m_alloc.createBuffer(cmdBuf, hitsVector, flag);
+	nvvk::Buffer rayHitBuffer = m_alloc.createBuffer(cmdBuf, hitsVector, flag | VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
+	nvvk::Buffer rayHitBufferCPU = m_alloc.createBuffer(cmdBuf, hitsVector,
+		VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+		VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
 
     VkDescriptorBufferInfo in_descriptorBufferInfo = {
         rayInfoBuffer.buffer,
@@ -473,11 +478,27 @@ void b3GpuRaycast::castRaysVk(const b3AlignedObjectArray<b3RayInfo>& rays, b3Ali
 
 	vkCmdDispatch(cmdBuf, nbRays, 1, 1);
 
+	VkBufferCopy copyRegion = {};
+	copyRegion.srcOffset = 0;
+	copyRegion.dstOffset = 0;
+	copyRegion.size = nbRays * sizeof(b3RayHit);
+
+	vkCmdCopyBuffer(cmdBuf, rayHitBuffer.buffer, rayHitBufferCPU.buffer, 1, &copyRegion);
+
 	cmdBufGet.submitAndWait(cmdBuf);
 	m_alloc.finalizeAndReleaseStaging();
 
+	b3RayHit* rayHitsCPU = reinterpret_cast<b3RayHit*>(m_alloc.map(rayHitBufferCPU));
+	hitResults.clear();
+	for (i = 0; i < nbRays; ++i) {
+		b3RayHit rayHit = rayHitsCPU[i];
+		hitResults.push_back(rayHit);
+	}
+	m_alloc.unmap(rayHitBufferCPU);
+
 	m_alloc.destroy(rayInfoBuffer);
 	m_alloc.destroy(rayHitBuffer);
+	m_alloc.destroy(rayHitBufferCPU);
 	vkDestroyDescriptorPool(m_data->m_vkContext.m_device, descriptorPool, NULL);
 }
 

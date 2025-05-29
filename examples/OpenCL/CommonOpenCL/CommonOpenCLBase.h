@@ -107,6 +107,9 @@ struct CommonOpenCLBase : public CommonExampleInterface
 		contextInfo.addDeviceExtension(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME); // Required by ray tracing pipeline
 		VkPhysicalDeviceRayQueryFeaturesKHR rayQueryFeature{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR};
 		contextInfo.addDeviceExtension(VK_KHR_RAY_QUERY_EXTENSION_NAME, false, &rayQueryFeature); // Required by ray query
+		VkPhysicalDeviceRayTracingPositionFetchFeaturesKHR rayPositionFetchFeature{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_POSITION_FETCH_FEATURES_KHR};
+		contextInfo.addDeviceExtension(VK_KHR_RAY_TRACING_POSITION_FETCH_EXTENSION_NAME, false, &rayPositionFetchFeature);
+		contextInfo.addDeviceExtension(VK_KHR_SHADER_NON_SEMANTIC_INFO_EXTENSION_NAME);
 
 		// Creating Vulkan base application
 		nvvk::Context vkctx{};

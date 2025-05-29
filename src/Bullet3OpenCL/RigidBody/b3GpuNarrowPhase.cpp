@@ -139,6 +139,22 @@ b3GpuNarrowPhase::~b3GpuNarrowPhase()
 	m_data->m_bvhData.clear();
 	delete m_data->m_treeNodesGPU;
 	delete m_data->m_subTreesGPU;
+	
+	const auto& convexUtilities = m_data->m_convexData;
+	const int nbConvexUtilities = convexUtilities->size();
+
+	int i;
+	for (i = 0; i < nbConvexUtilities; ++i) {
+		b3ConvexUtility*& convexUtility = convexUtilities->at(i);
+		if (convexUtility != nullptr)
+			delete convexUtility;
+	}
+	for (i = 0; i < m_data->m_vertexBuffersGPU.size(); ++i) {
+		m_vkContext.m_pAlloc->destroy(m_data->m_vertexBuffersGPU[i]);
+		m_vkContext.m_pAlloc->destroy(m_data->m_indexBuffersGPU[i]);
+	}
+	m_data->m_vertexBuffersGPU.clear();
+	m_data->m_indexBuffersGPU.clear();
 
 	delete m_data->m_convexData;
 	delete m_data;
@@ -1002,26 +1018,18 @@ int b3GpuNarrowPhase::getNumRigidBodies() const
 void b3GpuNarrowPhase::createBottomLevelAS() {
 	const auto& convexUtilities = m_data->m_convexData;
 	const int nbConvexUtilities = convexUtilities->size();
+	const int nbBlas = m_data->m_vertexBuffersGPU.size();
 	std::vector<nvvk::RaytracingBuilderKHR::BlasInput> allBlas;
 	allBlas.reserve(nbConvexUtilities);
 
 	int i;
-	for (i = 0; i < nbConvexUtilities; ++i) {
+	for (i = nbBlas; i < nbConvexUtilities; ++i) {
 		b3ConvexUtility*& convexUtility = convexUtilities->at(i);
 		auto blas = objectToVkGeometry(i);
 		allBlas.emplace_back(blas);
-		if (convexUtility != nullptr)
-			delete convexUtility;
 	}
 
-	(m_vkContext.m_pRtBuilder)->buildBlas(allBlas, VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR);
-	
-	for (i = 0; i < nbConvexUtilities; ++i) {
-		m_vkContext.m_pAlloc->destroy(m_data->m_vertexBuffersGPU[i]);
-		m_vkContext.m_pAlloc->destroy(m_data->m_indexBuffersGPU[i]);
-	}
-	m_data->m_vertexBuffersGPU.clear();
-	m_data->m_indexBuffersGPU.clear();
+	(m_vkContext.m_pRtBuilder)->buildBlas(allBlas, VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR | VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_DATA_ACCESS_KHR);
 }
 
 void b3GpuNarrowPhase::createTopLevelAS() {
@@ -1037,8 +1045,8 @@ void b3GpuNarrowPhase::createTopLevelAS() {
 		VkAccelerationStructureInstanceKHR rayInst{};
 		glm::mat4 transform = glm::mat4(1.0f);
 		glm::vec3 position = { inst.m_pos.x, inst.m_pos.y, inst.m_pos.z };
-		glm::quat rotation(inst.m_quat.w, inst.m_quat.x, inst.m_quat.y, inst.m_quat.z);
-		transform = glm::translate(transform, position) * glm::toMat4(rotation);
+		//glm::quat rotation(inst.m_quat.w, inst.m_quat.x, inst.m_quat.y, inst.m_quat.z);
+		transform = glm::translate(transform, position); // *glm::toMat4(rotation);
 		rayInst.transform                      = nvvk::toTransformMatrixKHR(transform);  // Position of the instance
 		rayInst.instanceCustomIndex            = collidableIndex;                               // gl_InstanceCustomIndexEXT
 		rayInst.accelerationStructureReference = (m_vkContext.m_pRtBuilder)->getBlasDeviceAddress(collidableIndex);
@@ -1047,7 +1055,7 @@ void b3GpuNarrowPhase::createTopLevelAS() {
 		rayInst.instanceShaderBindingTableRecordOffset = 0;  // We will use the same hit group for all objects
 		tlas.emplace_back(rayInst);
 	}
-	(m_vkContext.m_pRtBuilder)->buildTlas(tlas, VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR);
+	(m_vkContext.m_pRtBuilder)->buildTlas(tlas, VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR | VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR);
 }
 
 void b3GpuNarrowPhase::writeAllBodiesToGpu()
