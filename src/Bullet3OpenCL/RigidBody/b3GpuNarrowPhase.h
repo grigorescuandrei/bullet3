@@ -49,6 +49,7 @@ public:
 
 	void createBottomLevelAS();
 	void createTopLevelAS();
+	void updateTopLevelAS();
 	void writeAllBodiesToGpu();
 	void reset();
 	void readbackAllBodiesToCpu();

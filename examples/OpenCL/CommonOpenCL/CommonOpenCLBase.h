@@ -29,6 +29,7 @@ struct CommonOpenCLBase : public CommonExampleInterface
 	b3VulkanContext m_vkContext;
 	nvvk::ResourceAllocatorDma m_alloc; // TODO: may need to replace this without DMA
 	nvvk::RaytracingBuilderKHR m_rtBuilder;
+	nvvk::DebugUtil m_debug; // Utility to name objects
 
 	CommonOpenCLBase(GUIHelperInterface* helper)
 		: m_guiHelper(helper),
@@ -143,6 +144,8 @@ struct CommonOpenCLBase : public CommonExampleInterface
 
 		m_alloc.init(m_vkContext.m_instance, m_vkContext.m_device, m_vkContext.m_physicalDevice);
 		m_vkContext.m_pAlloc = &m_alloc;
+		m_debug.setup(m_vkContext.m_device);
+		m_vkContext.m_debug = m_debug;
 		m_rtBuilder.setup(m_vkContext.m_device, m_vkContext.m_pAlloc, m_vkContext.m_queueIndex);
 		m_vkContext.m_pRtBuilder = &m_rtBuilder;
 

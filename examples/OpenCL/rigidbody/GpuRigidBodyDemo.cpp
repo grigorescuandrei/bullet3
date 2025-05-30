@@ -397,6 +397,8 @@ bool GpuRigidBodyDemo::mouseButtonCallback(int button, int state, float x, float
 	{
 		if (button == 0 && (m_data->m_altPressed == 0 && m_data->m_controlPressed == 0))
 		{
+			m_data->m_np->updateTopLevelAS();
+
 			b3AlignedObjectArray<b3RayInfo> rays;
 			b3AlignedObjectArray<b3RayHit> hitResults;
 			b3Vector3 camPos;
@@ -416,7 +418,6 @@ bool GpuRigidBodyDemo::mouseButtonCallback(int button, int state, float x, float
 				if (m_data->m_np->getBodiesCpu()[hitBodyA].m_invMass)
 				{
 					//printf("hit!\n");
-					m_data->m_np->readbackAllBodiesToCpu();
 					m_data->m_pickBody = hitBodyA;
 
 					//pivotInA

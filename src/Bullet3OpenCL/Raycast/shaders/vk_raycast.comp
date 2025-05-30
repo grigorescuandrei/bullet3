@@ -46,31 +46,31 @@ void main() {
     uint index = gl_GlobalInvocationID.x;
 
 	RayInfo ray = rays[index];
-	vec3 origin = vec3(0.0, 100.0, 0.0); //ray.m_from;
-	vec3 direction = vec3(0.0,-1.0,0.0);//normalize(ray.m_to - ray.m_from);
+	vec3 origin = ray.m_from;
+	vec3 direction = normalize(ray.m_to - ray.m_from);
 
 	float tMin      = 0.01f;
-	float tMax      = 10000.0f; //length(ray.m_to - ray.m_from) + 0.01f;
+	float tMax      = length(ray.m_to - ray.m_from) + 0.01f;
 	
 	rayQueryEXT rayQuery;
-	rayQueryInitializeEXT(rayQuery, topLevelAS, gl_RayFlagsTerminateOnFirstHitEXT, 0xFF, origin, tMin, direction, tMax);
+	rayQueryInitializeEXT(rayQuery, topLevelAS, gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsOpaqueEXT, 0xFF, origin, tMin, direction, tMax);
+	
+	rayHits[index].m_hitPoint = origin;
+	rayHits[index].m_hitNormal = direction;
 
 	// Start traversal: return false if traversal is complete
-	while(rayQueryProceedEXT(rayQuery)) {
-		// Returns type of committed (true) intersection
-		if(rayQueryGetIntersectionTypeEXT(rayQuery, true) != gl_RayQueryCommittedIntersectionNoneEXT) {
-			// Got an intersection
-			int hitBodyIndex = rayQueryGetIntersectionInstanceIdEXT(rayQuery, true);
-			rayHits[index].m_hitBody = hitBodyIndex;
-			rayHits[index].m_hitFraction += 0.1f;
-			vec3 vertices[3];
-			rayQueryGetIntersectionTriangleVertexPositionsEXT(rayQuery, true, vertices);
-			vec2 barycentrics = rayQueryGetIntersectionBarycentricsEXT(rayQuery, true);
-			rayHits[index].m_hitPoint = getHitPosition(vertices, barycentrics);
-		} else {
-			rayHits[index].m_hitFraction += 0.01f;
-			rayHits[index].m_hitPoint = origin;
-			rayHits[index].m_hitNormal = direction;
-		}
+	while(rayQueryProceedEXT(rayQuery)) {}
+
+	// Returns type of committed (true) intersection
+	if(rayQueryGetIntersectionTypeEXT(rayQuery, true) != gl_RayQueryCommittedIntersectionNoneEXT) {
+		// Got an intersection
+		int hitBodyIndex = rayQueryGetIntersectionInstanceIdEXT(rayQuery, true);
+		rayHits[index].m_hitBody = hitBodyIndex;
+		vec3 vertices[3];
+		rayQueryGetIntersectionTriangleVertexPositionsEXT(rayQuery, true, vertices);
+		vec2 barycentrics = rayQueryGetIntersectionBarycentricsEXT(rayQuery, true);
+		rayHits[index].m_hitPoint = getHitPosition(vertices, barycentrics);
+	} else {
+		rayHits[index].m_hitBody = -1;
 	}
 }

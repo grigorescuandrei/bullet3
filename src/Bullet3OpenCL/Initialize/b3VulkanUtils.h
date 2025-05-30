@@ -38,6 +38,7 @@ struct b3VulkanContext {
 
 	nvvk::ResourceAllocatorDma* m_pAlloc; // TODO: may need to replace this without DMA
 	nvvk::RaytracingBuilderKHR* m_pRtBuilder;
+    nvvk::DebugUtil m_debug;
 
     static VkResult CreateDebugUtilsMessengerEXT(VkInstance instance, const VkDebugUtilsMessengerCreateInfoEXT* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkDebugUtilsMessengerEXT* pDebugMessenger) {
         auto func = (PFN_vkCreateDebugUtilsMessengerEXT) vkGetInstanceProcAddr(instance, "vkCreateDebugUtilsMessengerEXT");
