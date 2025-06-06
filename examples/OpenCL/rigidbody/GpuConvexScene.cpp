@@ -33,11 +33,198 @@ extern int gGpuArraySizeZ;
 #include "GpuRigidBodyDemo.h"
 #include "Bullet3Common/b3AlignedObjectArray.h"
 #include "Bullet3Collision/NarrowPhaseCollision/b3RaycastInfo.h"
+#include <LinearMath/btQuickprof.h>
+
+#define NUMRAYS 500
+#define USE_BT_CLOCK 1
+
+class b3RaycastBar2
+{
+public:
+	b3Vector3 source[NUMRAYS];
+	b3Vector3 dest[NUMRAYS];
+	b3Vector3 direction[NUMRAYS];
+	b3Vector3 hit[NUMRAYS];
+	b3Vector3 normal[NUMRAYS];
+	struct GUIHelperInterface* m_guiHelper;
+		
+	b3AlignedObjectArray<b3RayInfo> rays;
+	b3AlignedObjectArray<b3RayHit> hitResults;
+
+	int frame_counter;
+	int ms;
+	int sum_ms;
+	int sum_ms_samples;
+	int min_ms;
+	int max_ms;
+
+#ifdef USE_BT_CLOCK
+	btClock frame_timer;
+#endif  //USE_BT_CLOCK
+
+	b3Scalar dx;
+	b3Scalar min_x;
+	b3Scalar max_x;
+	b3Scalar max_y;
+	b3Scalar sign;
+
+	b3RaycastBar2()
+	{
+		m_guiHelper = 0;
+		ms = 0;
+		max_ms = 0;
+		min_ms = 9999;
+		sum_ms_samples = 0;
+		sum_ms = 0;
+
+		for (int i = 0; i < NUMRAYS; ++i)
+		{
+			b3RayInfo cb(source[i], dest[i]);
+			rays.push_back(cb);
+
+			b3RayHit hit;
+			hit.m_hitFraction = 1.f;
+			hitResults.push_back(hit);
+		}
+	}
+
+	b3RaycastBar2(b3Scalar ray_length, b3Scalar z, b3Scalar max_y, struct GUIHelperInterface* guiHelper)
+	{
+		m_guiHelper = guiHelper;
+		frame_counter = 0;
+		ms = 0;
+		max_ms = 0;
+		min_ms = 9999;
+		sum_ms_samples = 0;
+		sum_ms = 0;
+		dx = 10.0;
+		min_x = 0;
+		max_x = 0;
+		this->max_y = max_y;
+		sign = 1.0;
+		b3Scalar dalpha = 2 * B3_2_PI / NUMRAYS;
+		for (int i = 0; i < NUMRAYS; i++)
+		{
+			b3Scalar alpha = dalpha * i;
+			// rotate around by alpha degrees y
+			b3Quaternion q(b3MakeVector3(0.0, 1.0, 0.0), alpha);
+			direction[i] = b3MakeVector3(1.0, 0.0, 0.0);
+			//direction[i] = quatRotate(q. direction[i]);
+			b3Quaternion q2 = q * direction[i];
+			q2 *= q.inverse();
+			direction[i] = b3MakeVector3(q2.getX(), q2.getY(), q2.getZ());
+			direction[i] = direction[i] * ray_length;
+
+			source[i] = b3MakeVector3(min_x, max_y, z);
+			dest[i] = source[i] + direction[i];
+			dest[i][1] = -1000;
+			normal[i] = b3MakeVector3(1.0, 0.0, 0.0);
+		}
+
+		for (int i = 0; i < NUMRAYS; ++i)
+		{
+			b3RayInfo cb(source[i], dest[i]);
+			rays.push_back(cb);
+
+			b3RayHit hit;
+			hit.m_hitFraction = 1.f;
+			hitResults.push_back(hit);
+		}
+	}
+
+	void move(b3Scalar dt)
+	{
+		if (dt > b3Scalar(1.0 / 60.0))
+			dt = b3Scalar(1.0 / 60.0);
+		for (int i = 0; i < NUMRAYS; i++)
+		{
+			source[i][0] += dx * dt * sign;
+			dest[i][0] += dx * dt * sign;
+		}
+		if (source[0][0] < min_x)
+			sign = 1.0;
+		else if (source[0][0] > max_x)
+			sign = -1.0;
+	}
+
+	void cast(b3GpuRigidBodyPipeline* rbPipeline, bool multiThreading = false)
+	{
+		B3_PROFILE("cast");
+
+#ifdef USE_BT_CLOCK
+		frame_timer.reset();
+#endif  //USE_BT_CLOCK
+
+		rbPipeline->castRays(rays, hitResults);
+		for (int i = 0; i < NUMRAYS; ++i)
+		{
+			b3RayHit cb = hitResults[i];
+
+			if (cb.m_hitFraction < 1.f)
+			{
+				hit[i] = cb.m_hitPoint;
+				normal[i] = cb.m_hitNormal;
+				normal[i].normalize();
+			}
+			else
+			{
+				hit[i] = dest[i];
+				normal[i] = b3MakeVector3(1.0, 0.0, 0.0);
+			}
+		}
+
+#ifdef USE_BT_CLOCK
+		ms += frame_timer.getTimeMilliseconds();
+#endif  //USE_BT_CLOCK
+		frame_counter++;
+		if (frame_counter > 50)
+		{
+			min_ms = ms < min_ms ? ms : min_ms;
+			max_ms = ms > max_ms ? ms : max_ms;
+			sum_ms += ms;
+			sum_ms_samples++;
+			b3Scalar mean_ms = (b3Scalar)sum_ms / (b3Scalar)sum_ms_samples;
+			printf("%d rays in %d ms %d %d %f\n", NUMRAYS * frame_counter, ms, min_ms, max_ms, mean_ms);
+			ms = 0;
+			frame_counter = 0;
+		}
+	}
+
+	void draw()
+	{
+		if (m_guiHelper)
+		{
+			b3AlignedObjectArray<unsigned int> indices;
+			b3AlignedObjectArray<b3Vector3FloatData> points;
+
+			float lineColor[4] = {1, 0.4, .4, 1};
+
+			for (int i = 0; i < NUMRAYS; i++)
+			{
+				b3Vector3FloatData s, h;
+				for (int w = 0; w < 4; w++)
+				{
+					s.m_floats[w] = source[i][w];
+					h.m_floats[w] = hit[i][w];
+				}
+
+				points.push_back(s);
+				points.push_back(h);
+				indices.push_back(indices.size());
+				indices.push_back(indices.size());
+			}
+
+			m_guiHelper->getRenderInterface()->drawLines(&points[0].m_floats[0], lineColor, points.size(), sizeof(b3Vector3FloatData), &indices[0], indices.size(), 1);
+		}
+
+	}
+};
 
 class GpuConvexScene : public GpuRigidBodyDemo
 {
 protected:
 	class b3GpuRaycast* m_raycaster;
+	class b3RaycastBar2 raycastBar;
 
 public:
 	GpuConvexScene(GUIHelperInterface* helper)
@@ -59,7 +246,16 @@ public:
 	virtual int createDynamicsObjects2(const float* vertices, int numVertices, const int* indices, int numIndices);
 
 	virtual void createStaticEnvironment();
+
+	virtual void stepSimulation(float deltaTime);
 };
+
+void GpuConvexScene::stepSimulation(float deltaTime) {
+	GpuRigidBodyDemo::stepSimulation(deltaTime);
+
+	raycastBar.cast(m_data->m_rigidBodyPipeline);
+	raycastBar.draw();
+}
 
 class GpuConvexPlaneScene : public GpuConvexScene
 {
@@ -133,6 +329,8 @@ void GpuConvexScene::setupScene()
 	m_guiHelper->getRenderInterface()->getActiveCamera()->setCameraPitch(-30);
 
 	m_guiHelper->getRenderInterface()->updateCamera(1);  //>updateCamera();
+
+	raycastBar = b3RaycastBar2(2500.0, 0, 50.0, m_guiHelper);
 
 	char msg[1024];
 	int numInstances = index;
