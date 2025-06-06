@@ -500,7 +500,7 @@ void b3GpuRaycast::castRaysVk(const b3AlignedObjectArray<b3RayInfo>& rays, b3Ali
 			auto& inst = narrowphaseData->m_bodyBufferCPU->at(rayHit.m_hitBody);
 			glm::vec3 position = { inst.m_pos.x, inst.m_pos.y, inst.m_pos.z };
 			glm::quat rotation(inst.m_quat.w, inst.m_quat.x, inst.m_quat.y, inst.m_quat.z);
-			auto worldHitPos = position + offset * rotation;
+			auto worldHitPos = position + rotation * offset;
 			rayHit.m_hitPoint = b3MakeVector3(worldHitPos.x, worldHitPos.y, worldHitPos.z);
 			// calculate hitFraction
 			rayHit.m_hitFraction = b3Distance(rays[i].m_from, rayHit.m_hitPoint) / b3Distance(rays[i].m_from, rays[i].m_to);
