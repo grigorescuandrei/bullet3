@@ -65,6 +65,7 @@ public:
 	void removeConstraint(b3TypedConstraint* constraint);
 
 	void castRays(const b3AlignedObjectArray<b3RayInfo>& rays, b3AlignedObjectArray<b3RayHit>& hitResults);
+	void castRaysVk(const b3AlignedObjectArray<b3RayInfo>& rays, b3AlignedObjectArray<b3RayHit>& hitResults, bool update = false);
 
 	cl_mem getBodyBuffer();
 

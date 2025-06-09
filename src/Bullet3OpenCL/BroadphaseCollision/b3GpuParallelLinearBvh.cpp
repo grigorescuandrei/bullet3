@@ -425,8 +425,8 @@ void b3GpuParallelLinearBvh::testRaysAgainstBvhAabbs(const b3OpenCLArray<b3RayIn
 	int numRayRigidPairs = -1;
 	out_numRayRigidPairs.copyToHostPointer(&numRayRigidPairs, 1);
 
-	//if (numRayRigidPairs > maxRayRigidPairs)
-	//	b3Error("Error running out of rayRigid pairs: numRayRigidPairs = %d, maxRayRigidPairs = %d.\n", numRayRigidPairs, maxRayRigidPairs);
+	if (numRayRigidPairs > maxRayRigidPairs)
+		b3Error("Error running out of rayRigid pairs: numRayRigidPairs = %d, maxRayRigidPairs = %d.\n", numRayRigidPairs, maxRayRigidPairs);
 }
 
 void b3GpuParallelLinearBvh::constructBinaryRadixTree()

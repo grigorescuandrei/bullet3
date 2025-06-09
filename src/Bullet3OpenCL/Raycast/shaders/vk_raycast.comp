@@ -53,7 +53,7 @@ void main() {
 	float tMax      = length(ray.m_to - ray.m_from) + 0.01f;
 	
 	rayQueryEXT rayQuery;
-	rayQueryInitializeEXT(rayQuery, topLevelAS, gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsOpaqueEXT, 0xFF, origin, tMin, direction, tMax);
+	rayQueryInitializeEXT(rayQuery, topLevelAS, gl_RayFlagsOpaqueEXT | gl_RayFlagsCullBackFacingTrianglesEXT, 0xFF, origin, tMin, direction, tMax);
 	
 	rayHits[index].m_hitPoint = origin;
 	rayHits[index].m_hitNormal = direction;

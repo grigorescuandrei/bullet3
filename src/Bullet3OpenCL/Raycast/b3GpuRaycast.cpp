@@ -536,7 +536,7 @@ void b3GpuRaycast::castRays(const b3AlignedObjectArray<b3RayInfo>& rays, b3Align
 		m_data->m_numRayRigidPairsPerRay->resize(numRays);
 
 		m_data->m_gpuNumRayRigidPairs->resize(1);
-		m_data->m_gpuRayRigidPairs->resize(numRays * 16);
+		m_data->m_gpuRayRigidPairs->resize(numRays * 80);
 	}
 
 	//run kernel

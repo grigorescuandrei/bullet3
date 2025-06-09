@@ -58,6 +58,11 @@ public:
 	int min_ms;
 	int max_ms;
 
+	b3Scalar sum_dist;
+	int sum_dist_samples;
+	b3Scalar min_dist;
+	b3Scalar max_dist;
+
 #ifdef USE_BT_CLOCK
 	btClock frame_timer;
 #endif  //USE_BT_CLOCK
@@ -95,8 +100,12 @@ public:
 		ms = 0;
 		max_ms = 0;
 		min_ms = 9999;
+		min_dist = 99999.9f;
+		max_dist = 0.0f;
 		sum_ms_samples = 0;
 		sum_ms = 0;
+		sum_dist = 0.0f;
+		sum_dist_samples = 0;
 		dx = 10.0;
 		min_x = 0;
 		max_x = 0;
@@ -196,11 +205,17 @@ public:
 		{
 			b3AlignedObjectArray<unsigned int> indices;
 			b3AlignedObjectArray<b3Vector3FloatData> points;
+			b3AlignedObjectArray<unsigned int> indices2;
+			b3AlignedObjectArray<b3Vector3FloatData> points2;
 
 			float lineColor[4] = {1, 0.4, .4, 1};
+			float lineColor2[4] = {0.4, 0.4, 1, 1};
 
 			for (int i = 0; i < NUMRAYS; i++)
 			{
+				b3Scalar dist = b3Distance(hit[i], hitResults[i].m_hitPoint);
+				if (dist < 0.1)
+					continue;
 				b3Vector3FloatData s, h;
 				for (int w = 0; w < 4; w++)
 				{
@@ -209,14 +224,74 @@ public:
 				}
 
 				points.push_back(s);
+				points2.push_back(s);
 				points.push_back(h);
 				indices.push_back(indices.size());
 				indices.push_back(indices.size());
+				indices2.push_back(indices2.size());
+				indices2.push_back(indices2.size());
+				
+				for (int w = 0; w < 4; w++)
+				{
+					h.m_floats[w] = hitResults.at(i).m_hitPoint[w];
+				}
+				points2.push_back(h);
 			}
 
 			m_guiHelper->getRenderInterface()->drawLines(&points[0].m_floats[0], lineColor, points.size(), sizeof(b3Vector3FloatData), &indices[0], indices.size(), 1);
+			m_guiHelper->getRenderInterface()->drawLines(&points2[0].m_floats[0], lineColor2, points2.size(), sizeof(b3Vector3FloatData), &indices2[0], indices2.size(), 1);
+		}
+	}
+
+	void compare(b3GpuRigidBodyPipeline* rbPipeline) {
+		rbPipeline->castRays(rays, hitResults);
+		for (int i = 0; i < NUMRAYS; ++i)
+		{
+			b3RayHit cb = hitResults[i];
+
+			if (cb.m_hitBody >= 0)
+			{
+				hit[i] = cb.m_hitPoint;
+				normal[i] = cb.m_hitNormal;
+				normal[i].normalize();
+			}
+			else
+			{
+				hit[i] = dest[i];
+				normal[i] = b3MakeVector3(1.0, 0.0, 0.0);
+			}
 		}
 
+		b3Scalar dist = 0.0;
+		b3Scalar currentDist;
+		rbPipeline->castRaysVk(rays, hitResults, true);
+		for (int i = 0; i < NUMRAYS; ++i)
+		{
+			b3RayHit cb = hitResults[i];
+
+			b3Vector3 hitPoint = cb.m_hitPoint;
+			if (cb.m_hitFraction >= 1.f)
+			{
+				hitPoint = dest[i];
+			}
+
+			currentDist = b3Distance(hit[i], hitPoint);
+			dist = dist < currentDist ? currentDist : dist;
+
+			hitResults[i].m_hitFraction = 1.f;
+		}
+		
+		frame_counter++;
+		if (frame_counter > 50)
+		{
+			min_dist = dist < min_dist ? dist : min_dist;
+			max_dist = dist > max_dist ? dist : max_dist;
+			sum_dist += dist;
+			sum_dist_samples++;
+			b3Scalar mean_dist = (b3Scalar)sum_dist / (b3Scalar)sum_dist_samples;
+			printf("%d rays with %f error; %f %f %f\n", NUMRAYS * frame_counter, dist, min_dist, max_dist, mean_dist);
+			frame_counter = 0;
+		}
 	}
 };
 
@@ -248,12 +323,18 @@ public:
 	virtual void createStaticEnvironment();
 
 	virtual void stepSimulation(float deltaTime);
+
+	virtual void physicsDebugDraw(int flags);
 };
 
 void GpuConvexScene::stepSimulation(float deltaTime) {
 	GpuRigidBodyDemo::stepSimulation(deltaTime);
+	//raycastBar.cast(m_data->m_rigidBodyPipeline);
+	//raycastBar.draw();
+	raycastBar.compare(m_data->m_rigidBodyPipeline);
+}
 
-	raycastBar.cast(m_data->m_rigidBodyPipeline);
+void GpuConvexScene::physicsDebugDraw(int flags) {
 	raycastBar.draw();
 }
 
@@ -319,18 +400,18 @@ void GpuConvexScene::setupScene()
 
 	m_data->m_rigidBodyPipeline->writeAllInstancesToGpu();
 
-	float camPos[4] = {0, 0, 0, 0};  //ci.arraySizeX,ci.arraySizeY/2,ci.arraySizeZ,0};
+	float camPos[4] = {0, 50, 0, 0};  //ci.arraySizeX,ci.arraySizeY/2,ci.arraySizeZ,0};
 	//float camPos[4]={1,12.5,1.5,0};
 
 	m_guiHelper->getRenderInterface()->getActiveCamera()->setCameraTargetPosition(camPos[0], camPos[1], camPos[2]);
-	m_guiHelper->getRenderInterface()->getActiveCamera()->setCameraDistance(150);
+	m_guiHelper->getRenderInterface()->getActiveCamera()->setCameraDistance(15);
 	//m_instancingRenderer->setCameraYaw(85);
 	m_guiHelper->getRenderInterface()->getActiveCamera()->setCameraYaw(225);
 	m_guiHelper->getRenderInterface()->getActiveCamera()->setCameraPitch(-30);
 
 	m_guiHelper->getRenderInterface()->updateCamera(1);  //>updateCamera();
 
-	raycastBar = b3RaycastBar2(2500.0, 0, 50.0, m_guiHelper);
+	raycastBar = b3RaycastBar2(500.0, 0, 15.0, m_guiHelper);
 
 	char msg[1024];
 	int numInstances = index;
@@ -431,12 +512,12 @@ int GpuConvexScene::createDynamicsObjects2(const float* vertices, int numVertice
 			colIndex = m_data->m_np->registerConvexHullShape(utilPtr);
 
 		//int colIndex = m_data->m_np->registerSphereShape(1);
-		for (int i = 0; i < gGpuArraySizeX; i++)
+		for (int i = 0; i < 11; i++)
 		{
 			//printf("%d of %d\n", i, ci.arraySizeX);
-			for (int j = 0; j < gGpuArraySizeY; j++)
+			for (int j = 0; j < 11; j++)
 			{
-				for (int k = 0; k < gGpuArraySizeZ; k++)
+				for (int k = 0; k < 11; k++)
 				{
 					//int colIndex = m_data->m_np->registerConvexHullShape(&vertices[0],strideInBytes,numVertices, scaling);
 					if (!gUseInstancedCollisionShapes)

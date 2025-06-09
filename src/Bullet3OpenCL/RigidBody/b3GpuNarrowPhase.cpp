@@ -1052,7 +1052,7 @@ void b3GpuNarrowPhase::createTopLevelAS() {
 		rayInst.transform                      = nvvk::toTransformMatrixKHR(transform);  // Position of the instance
 		rayInst.instanceCustomIndex            = collidableIndex;                               // gl_InstanceCustomIndexEXT
 		rayInst.accelerationStructureReference = (m_vkContext.m_pRtBuilder)->getBlasDeviceAddress(collidableIndex);
-		rayInst.flags                          = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
+		//rayInst.flags                          = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
 		rayInst.mask                           = 0xFF;       //  Only be hit if rayMask & instance.mask != 0
 		rayInst.instanceShaderBindingTableRecordOffset = 0;  // We will use the same hit group for all objects
 		tlas.emplace_back(rayInst);
@@ -1085,7 +1085,7 @@ void b3GpuNarrowPhase::updateTopLevelAS() {
 		rayInst.transform                      = nvvk::toTransformMatrixKHR(transform);  // Position of the instance
 		rayInst.instanceCustomIndex            = collidableIndex;                        // gl_InstanceCustomIndexEXT
 		rayInst.accelerationStructureReference = (m_vkContext.m_pRtBuilder)->getBlasDeviceAddress(collidableIndex);
-		rayInst.flags                          = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
+		//rayInst.flags                          = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
 		rayInst.mask                           = 0xFF;       //  Only be hit if rayMask & instance.mask != 0
 		rayInst.instanceShaderBindingTableRecordOffset = 0;  // We will use the same hit group for all objects
 		tlas.emplace_back(rayInst);
