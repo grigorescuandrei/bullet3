@@ -60,7 +60,10 @@ b3GpuRaycast::b3GpuRaycast(cl_context ctx, cl_device_id device, cl_command_queue
 
 	m_data->m_vkContext = vkContext;
 
-	auto shader = nvh::loadFile("vk_raycast_comp.spv", true, {SHADERS_PATH}, true);
+	auto shader = nvh::loadFile("vk_raycast_comp.spv", true, shaderPaths, true);
+	if (shader == "") {
+		throw std::runtime_error("Could not find Vulkan ray cast shader");
+	}
 	VkShaderModuleCreateInfo shaderModuleCreateInfo = {
         VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,      // VkStructureType              sType;
         0,                                                // const void*                  pNext;

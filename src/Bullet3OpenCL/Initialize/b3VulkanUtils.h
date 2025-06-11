@@ -14,7 +14,13 @@
 #include "nvvk/resourceallocator_vk.hpp"
 #include <iostream>
 
-#define SHADERS_PATH "C:\\facultate\\hpc4\\project\\bullet3\\src\\Bullet3OpenCL\\Raycast\\shaders"
+const std::vector<std::string> shaderPaths = {
+    "..",
+    ".\\..\\..\\src\\Bullet3OpenCL\\Raycast\\shaders",
+    ".\\shaders",
+    "..\\src\\Bullet3OpenCL\\Raycast\\shaders",
+    ".\\src\\Bullet3OpenCL\\Raycast\\shaders"
+};
 
 const std::vector<const char*> validationLayers = {
     "VK_LAYER_KHRONOS_validation"
