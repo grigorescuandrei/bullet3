@@ -411,7 +411,7 @@ bool GpuRigidBodyDemo::mouseButtonCallback(int button, int state, float x, float
 			b3RayHit hit;
 			hit.m_hitFraction = 1.f;
 			hitResults.push_back(hit);
-			m_data->m_rigidBodyPipeline->castRays(rays, hitResults);
+			m_data->m_rigidBodyPipeline->castRaysVk(rays, hitResults, true);
 			if (hitResults[0].m_hitFraction < 1.f)
 			{
 				int hitBodyA = hitResults[0].m_hitBody;
