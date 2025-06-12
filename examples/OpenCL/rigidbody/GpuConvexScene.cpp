@@ -165,7 +165,7 @@ public:
 #endif  //USE_BT_CLOCK
 
 		//rbPipeline->castRays(rays, hitResults);
-		rbPipeline->castRaysVk(rays, hitResults, false);
+		rbPipeline->castRaysVk(rays, hitResults, true);
 		for (int i = 0; i < NUMRAYS; ++i)
 		{
 			b3RayHit cb = hitResults[i];
@@ -239,10 +239,10 @@ public:
 				points2.push_back(h);
 			}
 
-			//if (indices.size()) {
-				m_guiHelper->getRenderInterface()->drawLines(&points[0].m_floats[0], lineColor, points.size(), sizeof(b3Vector3FloatData), &indices[0], indices.size(), 1);
-			//	m_guiHelper->getRenderInterface()->drawLines(&points2[0].m_floats[0], lineColor2, points2.size(), sizeof(b3Vector3FloatData), &indices2[0], indices2.size(), 1);
-			//}
+			if (indices.size()) {
+				//m_guiHelper->getRenderInterface()->drawLines(&points[0].m_floats[0], lineColor, points.size(), sizeof(b3Vector3FloatData), &indices[0], indices.size(), 1);
+				m_guiHelper->getRenderInterface()->drawLines(&points2[0].m_floats[0], lineColor2, points2.size(), sizeof(b3Vector3FloatData), &indices2[0], indices2.size(), 1);
+			}
 		}
 	}
 
@@ -517,12 +517,12 @@ int GpuConvexScene::createDynamicsObjects2(const float* vertices, int numVertice
 			colIndex = m_data->m_np->registerConvexHullShape(utilPtr);
 
 		//int colIndex = m_data->m_np->registerSphereShape(1);
-		for (int i = 0; i < 10; i++)
+		for (int i = 0; i < gGpuArraySizeX; i++)
 		{
 			//printf("%d of %d\n", i, ci.arraySizeX);
-			for (int j = 0; j < 10; j++)
+			for (int j = 0; j < gGpuArraySizeY; j++)
 			{
-				for (int k = 0; k < 10; k++)
+				for (int k = 0; k < gGpuArraySizeZ; k++)
 				{
 					//int colIndex = m_data->m_np->registerConvexHullShape(&vertices[0],strideInBytes,numVertices, scaling);
 					if (!gUseInstancedCollisionShapes)
