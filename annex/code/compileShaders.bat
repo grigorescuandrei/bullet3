@@ -1,0 +1,1 @@
+glslc ".\src\Bullet3OpenCL\Raycast\shaders\vk_raycast.comp" -o ".\src\Bullet3OpenCl\Raycast\shaders\vk_raycast_comp.spv" --target-spv=spv1.4 -g

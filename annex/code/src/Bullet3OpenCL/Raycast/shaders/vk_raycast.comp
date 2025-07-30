@@ -1,0 +1,76 @@
+#version 460
+#extension GL_EXT_ray_tracing : enable
+#extension GL_EXT_ray_query : enable
+#extension GL_EXT_ray_tracing_position_fetch : enable
+
+struct RayInfo {
+	vec3 m_from;
+	vec3 m_to;
+};
+
+struct RayHit {
+	float m_hitFraction;
+	int m_hitBody;
+	int m_hitResult1;
+	int m_hitResult2;
+	vec3 m_hitPoint;
+	vec3 m_hitNormal;
+};
+
+struct RayQueryHit {
+	int hitBody;
+	vec3 hitPosObjSpace;
+	vec3 hitNormal;
+};
+
+layout(set = 0, binding = 0) uniform accelerationStructureEXT topLevelAS;
+
+layout(set = 0, binding = 1) readonly buffer RayInfoBuffer {
+    RayInfo rays[];
+};
+
+layout(set = 0, binding = 2) writeonly buffer RayHitBuffer {
+	RayHit rayHits[];
+};
+
+vec3 getHitPosition(vec3 vertices[3], vec2 baryUV) {
+    float u = baryUV.x;
+    float v = baryUV.y;
+    float w = 1.0 - u - v; // The third barycentric weight
+
+    return u * vertices[1] + v * vertices[2] + w * vertices[0];
+}
+
+void main() {
+
+    uint index = gl_GlobalInvocationID.x;
+
+	RayInfo ray = rays[index];
+	vec3 origin = ray.m_from;
+	vec3 direction = normalize(ray.m_to - ray.m_from);
+
+	float tMin      = 0.01f;
+	float tMax      = length(ray.m_to - ray.m_from) + 0.01f;
+	
+	rayQueryEXT rayQuery;
+	rayQueryInitializeEXT(rayQuery, topLevelAS, gl_RayFlagsOpaqueEXT | gl_RayFlagsCullBackFacingTrianglesEXT, 0xFF, origin, tMin, direction, tMax);
+	
+	rayHits[index].m_hitPoint = origin;
+	rayHits[index].m_hitNormal = direction;
+
+	// Start traversal: return false if traversal is complete
+	while(rayQueryProceedEXT(rayQuery)) {}
+
+	// Returns type of committed (true) intersection
+	if(rayQueryGetIntersectionTypeEXT(rayQuery, true) != gl_RayQueryCommittedIntersectionNoneEXT) {
+		// Got an intersection
+		int hitBodyIndex = rayQueryGetIntersectionInstanceIdEXT(rayQuery, true);
+		rayHits[index].m_hitBody = hitBodyIndex;
+		vec3 vertices[3];
+		rayQueryGetIntersectionTriangleVertexPositionsEXT(rayQuery, true, vertices);
+		vec2 barycentrics = rayQueryGetIntersectionBarycentricsEXT(rayQuery, true);
+		rayHits[index].m_hitPoint = getHitPosition(vertices, barycentrics);
+	} else {
+		rayHits[index].m_hitBody = -1;
+	}
+}
