@@ -69,7 +69,10 @@ void main() {
 		vec3 vertices[3];
 		rayQueryGetIntersectionTriangleVertexPositionsEXT(rayQuery, true, vertices);
 		vec2 barycentrics = rayQueryGetIntersectionBarycentricsEXT(rayQuery, true);
-		rayHits[index].m_hitPoint = getHitPosition(vertices, barycentrics);
+		vec3 objHitPos = getHitPosition(vertices, barycentrics);
+		mat4x3 objToWorldMatrix = rayQueryGetIntersectionObjectToWorldEXT(rayQuery, true);
+		rayHits[index].m_hitPoint = objToWorldMatrix * vec4(objHitPos, 1.0);
+		rayHits[index].m_hitFraction = rayQueryGetIntersectionTEXT(rayQuery, true) / tMax;
 	} else {
 		rayHits[index].m_hitBody = -1;
 	}

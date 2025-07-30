@@ -495,19 +495,19 @@ void b3GpuRaycast::castRaysVk(const b3AlignedObjectArray<b3RayInfo>& rays, b3Ali
 	hitResults.clear();
 	for (i = 0; i < nbRays; ++i) {
 		b3RayHit rayHit = rayHitsCPU[i];
-		if (rayHit.m_hitBody >= 0) {
-			// hit
-			// transform object-space hit position to world-space
-			const auto& rayHitPos = rayHit.m_hitPoint;
-			glm::vec3 offset = {rayHitPos.x, rayHitPos.y, rayHitPos.z};
-			auto& inst = narrowphaseData->m_bodyBufferCPU->at(rayHit.m_hitBody);
-			glm::vec3 position = { inst.m_pos.x, inst.m_pos.y, inst.m_pos.z };
-			glm::quat rotation(inst.m_quat.w, inst.m_quat.x, inst.m_quat.y, inst.m_quat.z);
-			auto worldHitPos = position + rotation * offset;
-			rayHit.m_hitPoint = b3MakeVector3(worldHitPos.x, worldHitPos.y, worldHitPos.z);
-			// calculate hitFraction
-			rayHit.m_hitFraction = b3Distance(rays[i].m_from, rayHit.m_hitPoint) / b3Distance(rays[i].m_from, rays[i].m_to);
-		}
+		//if (rayHit.m_hitBody >= 0) {
+		//	// hit
+		//	// transform object-space hit position to world-space
+		//	const auto& rayHitPos = rayHit.m_hitPoint;
+		//	glm::vec3 offset = {rayHitPos.x, rayHitPos.y, rayHitPos.z};
+		//	auto& inst = narrowphaseData->m_bodyBufferCPU->at(rayHit.m_hitBody);
+		//	glm::vec3 position = { inst.m_pos.x, inst.m_pos.y, inst.m_pos.z };
+		//	glm::quat rotation(inst.m_quat.w, inst.m_quat.x, inst.m_quat.y, inst.m_quat.z);
+		//	auto worldHitPos = position + rotation * offset;
+		//	rayHit.m_hitPoint = b3MakeVector3(worldHitPos.x, worldHitPos.y, worldHitPos.z);
+		//	// calculate hitFraction
+		//	rayHit.m_hitFraction = b3Distance(rays[i].m_from, rayHit.m_hitPoint) / b3Distance(rays[i].m_from, rays[i].m_to);
+		//}
 		hitResults.push_back(rayHit);
 	}
 	m_alloc.unmap(rayHitBufferCPU);
