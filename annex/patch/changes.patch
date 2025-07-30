@@ -1,0 +1,1614 @@
+diff --git a/compileShaders.bat b/compileShaders.bat
+new file mode 100644
+index 000000000..d1dc57a6c
+--- /dev/null
++++ b/compileShaders.bat
+@@ -0,0 +1 @@
++glslc ".\src\Bullet3OpenCL\Raycast\shaders\vk_raycast.comp" -o ".\src\Bullet3OpenCl\Raycast\shaders\vk_raycast_comp.spv" --target-spv=spv1.4 -g
+\ No newline at end of file
+diff --git a/examples/ExampleBrowser/ExampleEntries.cpp b/examples/ExampleBrowser/ExampleEntries.cpp
+index 715a4396d..d7e54ef2c 100644
+--- a/examples/ExampleBrowser/ExampleEntries.cpp
++++ b/examples/ExampleBrowser/ExampleEntries.cpp
+@@ -399,12 +399,13 @@ static ExampleEntry gDefaultExamples[] =
+ #ifdef B3_USE_CLEW
+ #ifndef NO_OPENGL3
+ static ExampleEntry gOpenCLExamples[] =
+-	{
+-		ExampleEntry(0, "OpenCL (experimental)"),
+-		ExampleEntry(1, "Box-Box", "Full OpenCL implementation of the entire physics and collision detection pipeline, showing box-box rigid body",
+-					 OpenCLBoxBoxCreateFunc),
+-		ExampleEntry(1, "Pair Bench", "Benchmark of overlapping pair search using OpenCL.", PairBenchOpenCLCreateFunc),
+-
++{
++	ExampleEntry(0, "OpenCL (experimental)"),
++	ExampleEntry(1, "Box-Box", "Full OpenCL implementation of the entire physics and collision detection pipeline, showing box-box rigid body",
++				 OpenCLBoxBoxCreateFunc),
++	ExampleEntry(1, "Pair Bench", "Benchmark of overlapping pair search using OpenCL.", PairBenchOpenCLCreateFunc),
++	ExampleEntry(1, "Plane Convex", "Benchmark of convex-plane rigid body collisions using OpenCL", OpenCLConvexPlaneCreateFunc),
++	ExampleEntry(1, "Tetra Breakable", "Benchmark of tetrahedra rigid body collisions using OpenCl", OpenCLTetraCreateFunc)
+ };
+ #endif
+ #endif  //
+diff --git a/examples/ExampleBrowser/OpenGLExampleBrowser.cpp b/examples/ExampleBrowser/OpenGLExampleBrowser.cpp
+index 0ff00865d..154c0811d 100644
+--- a/examples/ExampleBrowser/OpenGLExampleBrowser.cpp
++++ b/examples/ExampleBrowser/OpenGLExampleBrowser.cpp
+@@ -1270,7 +1270,7 @@ void OpenGLExampleBrowser::update(float deltaTime)
+ 			BT_PROFILE("Render Scene");
+ 			sCurrentDemo->renderScene();
+ 		}
+-		else
++		//else
+ 		{
+ 			B3_PROFILE("physicsDebugDraw");
+ 			glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+diff --git a/examples/OpenCL/CommonOpenCL/CommonOpenCLBase.h b/examples/OpenCL/CommonOpenCL/CommonOpenCLBase.h
+index e327b0e12..2e4ec8a2c 100644
+--- a/examples/OpenCL/CommonOpenCL/CommonOpenCLBase.h
++++ b/examples/OpenCL/CommonOpenCL/CommonOpenCLBase.h
+@@ -11,12 +11,26 @@
+ #include "GpuDemoInternalData.h"
+ #include "Bullet3Common/b3Scalar.h"
+ #include "Bullet3OpenCL/Initialize/b3OpenCLUtils.h"
++#include "Bullet3OpenCL/Initialize/b3VulkanUtils.h"
++
++// # Vulkan
++#include "vulkan/vulkan_core.h"
++#include "nvpsystem.hpp"
++#include <nvvk/context_vk.hpp>
++// TODO: maybe add this
++//#include "nvvk/commands_vk.hpp"
++#include <nvvk/raytraceKHR_vk.hpp>
+ 
+ struct CommonOpenCLBase : public CommonExampleInterface
+ {
+ 	struct GUIHelperInterface* m_guiHelper;
+ 	struct GpuDemoInternalData* m_clData;
+ 
++	b3VulkanContext m_vkContext;
++	nvvk::ResourceAllocatorDma m_alloc; // TODO: may need to replace this without DMA
++	nvvk::RaytracingBuilderKHR m_rtBuilder;
++	nvvk::DebugUtil m_debug; // Utility to name objects
++
+ 	CommonOpenCLBase(GUIHelperInterface* helper)
+ 		: m_guiHelper(helper),
+ 		  m_clData(0)
+@@ -70,6 +84,74 @@ struct CommonOpenCLBase : public CommonExampleInterface
+ 		}
+ 	}
+ 
++	virtual void initVulkan() {
++		// Vulkan required extensions
++		//assert(glfwVulkanSupported() == 1);
++		uint32_t count{0};
++
++		// Requesting Vulkan extensions and layers
++		nvvk::ContextCreateInfo contextInfo;
++		//contextInfo.verboseUsed = true;
++		contextInfo.setVersion(1, 2);                       // Using Vulkan 1.2
++		contextInfo.addInstanceLayer("VK_LAYER_LUNARG_monitor", true);              // FPS in titlebar
++		contextInfo.addInstanceExtension(VK_EXT_DEBUG_UTILS_EXTENSION_NAME, true);  // Allow debug names
++		//contextInfo.addDeviceExtension(VK_KHR_SURFACE_EXTENSION_NAME); /// (this is instance actually)
++		//contextInfo.addDeviceExtension(VK_KHR_SWAPCHAIN_EXTENSION_NAME);            // Enabling ability to present rendering
++
++		//requesting raytracing extensions
++		// #VKRay: Activate the ray tracing extension
++		VkPhysicalDeviceAccelerationStructureFeaturesKHR accelFeature{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR};
++		contextInfo.addDeviceExtension(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME, false, &accelFeature); // To build acceleration structures
++		VkPhysicalDeviceRayTracingPipelineFeaturesKHR rtPipelineFeature{};
++		rtPipelineFeature.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR;
++		contextInfo.addDeviceExtension(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME, false, &rtPipelineFeature); // To use vkCmdTraceRaysKHR
++		contextInfo.addDeviceExtension(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME); // Required by ray tracing pipeline
++		VkPhysicalDeviceRayQueryFeaturesKHR rayQueryFeature{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR};
++		contextInfo.addDeviceExtension(VK_KHR_RAY_QUERY_EXTENSION_NAME, false, &rayQueryFeature); // Required by ray query
++		VkPhysicalDeviceRayTracingPositionFetchFeaturesKHR rayPositionFetchFeature{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_POSITION_FETCH_FEATURES_KHR};
++		contextInfo.addDeviceExtension(VK_KHR_RAY_TRACING_POSITION_FETCH_EXTENSION_NAME, false, &rayPositionFetchFeature);
++		contextInfo.addDeviceExtension(VK_KHR_SHADER_NON_SEMANTIC_INFO_EXTENSION_NAME);
++
++		// Creating Vulkan base application
++		nvvk::Context vkctx{};
++		vkctx.initInstance(contextInfo);
++		// Find all compatible devices
++		auto compatibleDevices = vkctx.getCompatibleDevices(contextInfo);
++		assert(!compatibleDevices.empty());
++		// Use a compatible device
++		bool successful = vkctx.initDevice(compatibleDevices[0], contextInfo);
++		if (successful) {
++			b3Printf("Successfully initialized Vulkan device!\n");
++		}
++
++		//setupVulkan(vkctx.m_instance, vkctx.m_device, vkctx.m_physicalDevice, vkctx.m_queueGCT.familyIndex);
++		setupVulkan(vkctx);
++	}
++
++	void setupVulkan(const nvvk::Context& context) {
++		m_vkContext.m_instance = context.m_instance;
++		m_vkContext.m_device = context.m_device;
++		m_vkContext.m_physicalDevice = context.m_physicalDevice;
++		m_vkContext.m_queueIndex = context.m_queueC.familyIndex;
++		vkGetDeviceQueue(m_vkContext.m_device, m_vkContext.m_queueIndex, 0, &(m_vkContext.m_queue));
++
++		// debug utils
++        m_vkContext.setupDebugMessenger();
++		
++		VkCommandPoolCreateInfo poolCreateInfo{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
++		poolCreateInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
++		vkCreateCommandPool(context.m_device, &poolCreateInfo, nullptr, &(m_vkContext.cmdPool));
++
++		m_alloc.init(m_vkContext.m_instance, m_vkContext.m_device, m_vkContext.m_physicalDevice);
++		m_vkContext.m_pAlloc = &m_alloc;
++		m_debug.setup(m_vkContext.m_device);
++		m_vkContext.m_debug = m_debug;
++		m_rtBuilder.setup(m_vkContext.m_device, m_vkContext.m_pAlloc, m_vkContext.m_queueIndex);
++		m_vkContext.m_pRtBuilder = &m_rtBuilder;
++
++		// TODO: pipelinecachecreateinfo
++	}
++
+ 	virtual void exitCL()
+ 	{
+ 		if (m_clData && m_clData->m_clInitialized)
+@@ -80,6 +162,11 @@ struct CommonOpenCLBase : public CommonExampleInterface
+ 		}
+ 	}
+ 
++	virtual void exitVulkan() {
++		m_vkContext.m_pRtBuilder->destroy();
++		m_vkContext.m_pAlloc->deinit();
++	}
++
+ 	virtual void renderScene()
+ 	{
+ 		if (m_guiHelper->getRenderInterface())
+diff --git a/examples/OpenCL/rigidbody/GpuConvexScene.cpp b/examples/OpenCL/rigidbody/GpuConvexScene.cpp
+index 8f93ba1ee..2017a5f89 100644
+--- a/examples/OpenCL/rigidbody/GpuConvexScene.cpp
++++ b/examples/OpenCL/rigidbody/GpuConvexScene.cpp
+@@ -33,11 +33,276 @@ extern int gGpuArraySizeZ;
+ #include "GpuRigidBodyDemo.h"
+ #include "Bullet3Common/b3AlignedObjectArray.h"
+ #include "Bullet3Collision/NarrowPhaseCollision/b3RaycastInfo.h"
++#include <LinearMath/btQuickprof.h>
++
++#define NUMRAYS 500
++#define USE_BT_CLOCK 1
++
++class b3RaycastBar2
++{
++public:
++	b3Vector3 source[NUMRAYS];
++	b3Vector3 dest[NUMRAYS];
++	b3Vector3 direction[NUMRAYS];
++	b3Vector3 hit[NUMRAYS];
++	b3Vector3 normal[NUMRAYS];
++	struct GUIHelperInterface* m_guiHelper;
++		
++	b3AlignedObjectArray<b3RayInfo> rays;
++	b3AlignedObjectArray<b3RayHit> hitResults;
++
++	int frame_counter;
++	int ms;
++	int sum_ms;
++	int sum_ms_samples;
++	int min_ms;
++	int max_ms;
++
++	b3Scalar sum_dist;
++	int sum_dist_samples;
++	b3Scalar min_dist;
++	b3Scalar max_dist;
++
++#ifdef USE_BT_CLOCK
++	btClock frame_timer;
++#endif  //USE_BT_CLOCK
++
++	b3Scalar dx;
++	b3Scalar min_x;
++	b3Scalar max_x;
++	b3Scalar max_y;
++	b3Scalar sign;
++
++	b3RaycastBar2()
++	{
++		m_guiHelper = 0;
++		ms = 0;
++		max_ms = 0;
++		min_ms = 9999;
++		sum_ms_samples = 0;
++		sum_ms = 0;
++
++		for (int i = 0; i < NUMRAYS; ++i)
++		{
++			b3RayInfo cb(source[i], dest[i]);
++			rays.push_back(cb);
++
++			b3RayHit hit;
++			hit.m_hitFraction = 1.f;
++			hitResults.push_back(hit);
++		}
++	}
++
++	b3RaycastBar2(b3Scalar ray_length, b3Scalar z, b3Scalar max_y, struct GUIHelperInterface* guiHelper)
++	{
++		m_guiHelper = guiHelper;
++		frame_counter = 0;
++		ms = 0;
++		max_ms = 0;
++		min_ms = 9999;
++		min_dist = 99999.9f;
++		max_dist = 0.0f;
++		sum_ms_samples = 0;
++		sum_ms = 0;
++		sum_dist = 0.0f;
++		sum_dist_samples = 0;
++		dx = 10.0;
++		min_x = 0;
++		max_x = 0;
++		this->max_y = max_y;
++		sign = 1.0;
++		b3Scalar dalpha = 2 * B3_2_PI / NUMRAYS;
++		for (int i = 0; i < NUMRAYS; i++)
++		{
++			b3Scalar alpha = dalpha * i;
++			// rotate around by alpha degrees y
++			b3Quaternion q(b3MakeVector3(0.0, 1.0, 0.0), alpha);
++			direction[i] = b3MakeVector3(1.0, 0.0, 0.0);
++			//direction[i] = quatRotate(q. direction[i]);
++			b3Quaternion q2 = q * direction[i];
++			q2 *= q.inverse();
++			direction[i] = b3MakeVector3(q2.getX(), q2.getY(), q2.getZ());
++			direction[i] = direction[i] * ray_length;
++
++			source[i] = b3MakeVector3(min_x, max_y, z);
++			dest[i] = source[i] + direction[i];
++			dest[i][1] = -1000;
++			normal[i] = b3MakeVector3(1.0, 0.0, 0.0);
++		}
++
++		for (int i = 0; i < NUMRAYS; ++i)
++		{
++			b3RayInfo cb(source[i], dest[i]);
++			rays.push_back(cb);
++
++			b3RayHit hit;
++			hit.m_hitFraction = 1.f;
++			hitResults.push_back(hit);
++		}
++	}
++
++	void move(b3Scalar dt)
++	{
++		if (dt > b3Scalar(1.0 / 60.0))
++			dt = b3Scalar(1.0 / 60.0);
++		for (int i = 0; i < NUMRAYS; i++)
++		{
++			source[i][0] += dx * dt * sign;
++			dest[i][0] += dx * dt * sign;
++		}
++		if (source[0][0] < min_x)
++			sign = 1.0;
++		else if (source[0][0] > max_x)
++			sign = -1.0;
++	}
++
++	void cast(b3GpuRigidBodyPipeline* rbPipeline, bool multiThreading = false)
++	{
++		B3_PROFILE("cast");
++
++#ifdef USE_BT_CLOCK
++		frame_timer.reset();
++#endif  //USE_BT_CLOCK
++
++		//rbPipeline->castRays(rays, hitResults);
++		rbPipeline->castRaysVk(rays, hitResults, true);
++		for (int i = 0; i < NUMRAYS; ++i)
++		{
++			b3RayHit cb = hitResults[i];
++
++			if (cb.m_hitFraction < 1.f)
++			{
++				hit[i] = cb.m_hitPoint;
++				normal[i] = cb.m_hitNormal;
++				normal[i].normalize();
++			}
++			else
++			{
++				hit[i] = dest[i];
++				normal[i] = b3MakeVector3(1.0, 0.0, 0.0);
++			}
++		}
++
++#ifdef USE_BT_CLOCK
++		ms += frame_timer.getTimeMilliseconds();
++#endif  //USE_BT_CLOCK
++		frame_counter++;
++		if (frame_counter > 50)
++		{
++			min_ms = ms < min_ms ? ms : min_ms;
++			max_ms = ms > max_ms ? ms : max_ms;
++			sum_ms += ms;
++			sum_ms_samples++;
++			b3Scalar mean_ms = (b3Scalar)sum_ms / (b3Scalar)sum_ms_samples;
++			printf("%d %d %d %d %f\n", NUMRAYS, ms, min_ms, max_ms, mean_ms);
++			ms = 0;
++			frame_counter = 0;
++		}
++	}
++
++	void draw()
++	{
++		if (m_guiHelper)
++		{
++			b3AlignedObjectArray<unsigned int> indices;
++			b3AlignedObjectArray<b3Vector3FloatData> points;
++			b3AlignedObjectArray<unsigned int> indices2;
++			b3AlignedObjectArray<b3Vector3FloatData> points2;
++
++			float lineColor[4] = {1, 0.4, .4, 1};
++			float lineColor2[4] = {0.4, 0.4, 1, 1};
++
++			for (int i = 0; i < NUMRAYS; i++)
++			{
++				b3Scalar dist = b3Distance(hit[i], hitResults[i].m_hitPoint);
++				//if (dist < 0.1)
++				//	continue;
++				b3Vector3FloatData s, h;
++				for (int w = 0; w < 4; w++)
++				{
++					s.m_floats[w] = source[i][w];
++					h.m_floats[w] = hit[i][w];
++				}
++
++				points.push_back(s);
++				points2.push_back(s);
++				points.push_back(h);
++				indices.push_back(indices.size());
++				indices.push_back(indices.size());
++				indices2.push_back(indices2.size());
++				indices2.push_back(indices2.size());
++				
++				for (int w = 0; w < 4; w++)
++				{
++					h.m_floats[w] = hitResults.at(i).m_hitPoint[w];
++				}
++				points2.push_back(h);
++			}
++
++			if (indices.size()) {
++				//m_guiHelper->getRenderInterface()->drawLines(&points[0].m_floats[0], lineColor, points.size(), sizeof(b3Vector3FloatData), &indices[0], indices.size(), 1);
++				m_guiHelper->getRenderInterface()->drawLines(&points2[0].m_floats[0], lineColor2, points2.size(), sizeof(b3Vector3FloatData), &indices2[0], indices2.size(), 1);
++			}
++		}
++	}
++
++	void compare(b3GpuRigidBodyPipeline* rbPipeline) {
++		rbPipeline->castRays(rays, hitResults);
++		for (int i = 0; i < NUMRAYS; ++i)
++		{
++			b3RayHit cb = hitResults[i];
++
++			if (cb.m_hitBody >= 0)
++			{
++				hit[i] = cb.m_hitPoint;
++				normal[i] = cb.m_hitNormal;
++				normal[i].normalize();
++			}
++			else
++			{
++				hit[i] = dest[i];
++				normal[i] = b3MakeVector3(1.0, 0.0, 0.0);
++			}
++		}
++
++		b3Scalar dist = 0.0;
++		b3Scalar currentDist;
++		rbPipeline->castRaysVk(rays, hitResults, true);
++		for (int i = 0; i < NUMRAYS; ++i)
++		{
++			b3RayHit cb = hitResults[i];
++
++			b3Vector3 hitPoint = cb.m_hitPoint;
++			if (cb.m_hitFraction >= 1.f)
++			{
++				hitPoint = dest[i];
++			}
++
++			currentDist = b3Distance(hit[i], hitPoint);
++			dist = dist < currentDist ? currentDist : dist;
++
++			hitResults[i].m_hitFraction = 1.f;
++		}
++		
++		frame_counter++;
++		if (frame_counter > 50)
++		{
++			min_dist = dist < min_dist ? dist : min_dist;
++			max_dist = dist > max_dist ? dist : max_dist;
++			sum_dist += dist;
++			sum_dist_samples++;
++			b3Scalar mean_dist = (b3Scalar)sum_dist / (b3Scalar)sum_dist_samples;
++			printf("%d %f %f %f %f\n", NUMRAYS, dist, min_dist, max_dist, mean_dist);
++			frame_counter = 0;
++		}
++	}
++};
+ 
+ class GpuConvexScene : public GpuRigidBodyDemo
+ {
+ protected:
+ 	class b3GpuRaycast* m_raycaster;
++	class b3RaycastBar2* raycastBar;
+ 
+ public:
+ 	GpuConvexScene(GUIHelperInterface* helper)
+@@ -59,8 +324,23 @@ public:
+ 	virtual int createDynamicsObjects2(const float* vertices, int numVertices, const int* indices, int numIndices);
+ 
+ 	virtual void createStaticEnvironment();
++
++	virtual void stepSimulation(float deltaTime);
++
++	virtual void physicsDebugDraw(int flags);
+ };
+ 
++void GpuConvexScene::stepSimulation(float deltaTime) {
++	GpuRigidBodyDemo::stepSimulation(deltaTime);
++	//raycastBar->cast(m_data->m_rigidBodyPipeline);
++	//raycastBar->draw();
++	//raycastBar->compare(m_data->m_rigidBodyPipeline);
++}
++
++void GpuConvexScene::physicsDebugDraw(int flags) {
++	//raycastBar->draw();
++}
++
+ class GpuConvexPlaneScene : public GpuConvexScene
+ {
+ public:
+@@ -94,6 +374,8 @@ protected:
+ 	void createFromTetGenData(const char* ele, const char* node);
+ 
+ public:
++	GpuTetraScene(GUIHelperInterface* helper) : GpuConvexScene(helper) {}
++
+ 	virtual const char* getName()
+ 	{
+ 		return "TetraBreakable";
+@@ -112,7 +394,7 @@ b3Vector4 colors[4] =
+ 
+ void GpuConvexScene::setupScene()
+ {
+-	m_raycaster = new b3GpuRaycast(m_clData->m_clContext, m_clData->m_clDevice, m_clData->m_clQueue);
++	m_raycaster = new b3GpuRaycast(m_clData->m_clContext, m_clData->m_clDevice, m_clData->m_clQueue, m_vkContext);
+ 
+ 	int index = 0;
+ 	createStaticEnvironment();
+@@ -121,17 +403,19 @@ void GpuConvexScene::setupScene()
+ 
+ 	m_data->m_rigidBodyPipeline->writeAllInstancesToGpu();
+ 
+-	float camPos[4] = {0, 0, 0, 0};  //ci.arraySizeX,ci.arraySizeY/2,ci.arraySizeZ,0};
++	float camPos[4] = {0, 50, 0, 0};  //ci.arraySizeX,ci.arraySizeY/2,ci.arraySizeZ,0};
+ 	//float camPos[4]={1,12.5,1.5,0};
+ 
+ 	m_guiHelper->getRenderInterface()->getActiveCamera()->setCameraTargetPosition(camPos[0], camPos[1], camPos[2]);
+-	m_guiHelper->getRenderInterface()->getActiveCamera()->setCameraDistance(150);
++	m_guiHelper->getRenderInterface()->getActiveCamera()->setCameraDistance(15);
+ 	//m_instancingRenderer->setCameraYaw(85);
+ 	m_guiHelper->getRenderInterface()->getActiveCamera()->setCameraYaw(225);
+ 	m_guiHelper->getRenderInterface()->getActiveCamera()->setCameraPitch(-30);
+ 
+ 	m_guiHelper->getRenderInterface()->updateCamera(1);  //>updateCamera();
+ 
++	raycastBar = new b3RaycastBar2(500.0, 0, 50.0, m_guiHelper);
++
+ 	char msg[1024];
+ 	int numInstances = index;
+ 	sprintf(msg, "Num objects = %d", numInstances);
+@@ -145,6 +429,8 @@ void GpuConvexScene::destroyScene()
+ {
+ 	delete m_raycaster;
+ 	m_raycaster = 0;
++	delete raycastBar;
++	raycastBar = 0;
+ }
+ 
+ int GpuConvexScene::createDynamicsObjects()
+@@ -219,7 +505,7 @@ int GpuConvexScene::createDynamicsObjects2(const float* vertices, int numVertice
+ 				verts.push_back(b3MakeVector3(vertex[0] * scaling[0], vertex[1] * scaling[1], vertex[2] * scaling[2]));
+ 			}
+ 
+-			bool merge = true;
++			bool merge = false;
+ 			if (numVertices)
+ 			{
+ 				utilPtr->initializePolyhedralFeatures(&verts[0], verts.size(), merge);
+@@ -272,7 +558,7 @@ int GpuConvexScene::createDynamicsObjects2(const float* vertices, int numVertice
+ 				}
+ 			}
+ 		}
+-		delete utilPtr;
++		//delete utilPtr;
+ 	}
+ 	return index;
+ }
+@@ -494,7 +780,7 @@ void GpuTetraScene::createFromTetGenData(const char* ele,
+ 			{
+ 				b3Vector4 scaling = b3MakeVector4(1, 1, 1, 1);
+ 				int colIndex = m_data->m_np->registerConvexHullShape(&mytetra_vertices[0], strideInBytes, numVertices, scaling);
+-				b3Vector3 position = b3MakeVector3(0, 150, 0);
++				b3Vector3 position = b3MakeVector3(0, 50, 0);
+ 				//				position+=average;//*1.2;//*2;
+ 				position += average * 1.2;  //*2;
+ 				//rigidBodyPositions.push_back(position);
+@@ -594,3 +880,11 @@ class CommonExampleInterface* OpenCLBoxBoxCreateFunc(struct CommonExampleOptions
+ {
+ 	return new GpuBoxPlaneScene(options.m_guiHelper);
+ }
++
++class CommonExampleInterface* OpenCLConvexPlaneCreateFunc(struct CommonExampleOptions& options) {
++	return new GpuConvexPlaneScene(options.m_guiHelper);
++}
++
++class CommonExampleInterface* OpenCLTetraCreateFunc(struct CommonExampleOptions& options) {
++	return new GpuTetraScene(options.m_guiHelper);
++}
+\ No newline at end of file
+diff --git a/examples/OpenCL/rigidbody/GpuConvexScene.h b/examples/OpenCL/rigidbody/GpuConvexScene.h
+index 6aea434bb..aaabec6f0 100644
+--- a/examples/OpenCL/rigidbody/GpuConvexScene.h
++++ b/examples/OpenCL/rigidbody/GpuConvexScene.h
+@@ -2,5 +2,7 @@
+ #define GPU_CONVEX_SCENE_H
+ 
+ class CommonExampleInterface* OpenCLBoxBoxCreateFunc(struct CommonExampleOptions& options);
++class CommonExampleInterface* OpenCLConvexPlaneCreateFunc(struct CommonExampleOptions& options);
++class CommonExampleInterface* OpenCLTetraCreateFunc(struct CommonExampleOptions& options);
+ 
+ #endif  //GPU_CONVEX_SCENE_H
+diff --git a/examples/OpenCL/rigidbody/GpuRigidBodyDemo.cpp b/examples/OpenCL/rigidbody/GpuRigidBodyDemo.cpp
+index 2ad14996c..8d68141e3 100644
+--- a/examples/OpenCL/rigidbody/GpuRigidBodyDemo.cpp
++++ b/examples/OpenCL/rigidbody/GpuRigidBodyDemo.cpp
+@@ -80,10 +80,10 @@ GpuRigidBodyDemo::GpuRigidBodyDemo(GUIHelperInterface* helper)
+ 
+ void GpuRigidBodyDemo::resetCamera()
+ {
+-	float dist = 114;
++	float dist = 15;
+ 	float pitch = -35;
+ 	float yaw = 52;
+-	float targetPos[3] = {0, 0, 0};
++	float targetPos[3] = {0, 5, 0};
+ 	m_data->m_guiHelper->resetCamera(dist, yaw, pitch, targetPos[0], targetPos[1], targetPos[2]);
+ }
+ 
+@@ -110,6 +110,7 @@ void GpuRigidBodyDemo::setupScene()
+ void GpuRigidBodyDemo::initPhysics()
+ {
+ 	initCL(gPreferredOpenCLDeviceIndex, gPreferredOpenCLPlatformIndex);
++	initVulkan();
+ 
+ 	m_guiHelper->setUpAxis(1);
+ 
+@@ -126,7 +127,7 @@ void GpuRigidBodyDemo::initPhysics()
+ 		m_data->m_config.m_maxBroadphasePairs = maxPairsPerBody * m_data->m_config.m_maxConvexBodies;
+ 		m_data->m_config.m_maxContactCapacity = m_data->m_config.m_maxBroadphasePairs;
+ 
+-		b3GpuNarrowPhase* np = new b3GpuNarrowPhase(m_clData->m_clContext, m_clData->m_clDevice, m_clData->m_clQueue, m_data->m_config);
++		b3GpuNarrowPhase* np = new b3GpuNarrowPhase(m_clData->m_clContext, m_clData->m_clDevice, m_clData->m_clQueue, m_vkContext, m_data->m_config);
+ 		b3GpuBroadphaseInterface* bp = 0;
+ 
+ 		if (useUniformGrid)
+@@ -141,10 +142,12 @@ void GpuRigidBodyDemo::initPhysics()
+ 		m_data->m_bp = bp;
+ 		m_data->m_broadphaseDbvt = new b3DynamicBvhBroadphase(m_data->m_config.m_maxConvexBodies);
+ 
+-		m_data->m_rigidBodyPipeline = new b3GpuRigidBodyPipeline(m_clData->m_clContext, m_clData->m_clDevice, m_clData->m_clQueue, np, bp, m_data->m_broadphaseDbvt, m_data->m_config);
++		m_data->m_rigidBodyPipeline = new b3GpuRigidBodyPipeline(m_clData->m_clContext, m_clData->m_clDevice, m_clData->m_clQueue, m_vkContext, np, bp, m_data->m_broadphaseDbvt, m_data->m_config);
+ 
+ 		setupScene();
+-
++		
++		np->createBottomLevelAS();
++		np->createTopLevelAS();
+ 		m_data->m_rigidBodyPipeline->writeAllInstancesToGpu();
+ 		np->writeAllBodiesToGpu();
+ 		bp->writeAabbsToGpu();
+@@ -167,6 +170,7 @@ void GpuRigidBodyDemo::exitPhysics()
+ 	m_data->m_bp = 0;
+ 
+ 	exitCL();
++	exitVulkan();
+ }
+ 
+ void GpuRigidBodyDemo::renderScene()
+@@ -393,6 +397,8 @@ bool GpuRigidBodyDemo::mouseButtonCallback(int button, int state, float x, float
+ 	{
+ 		if (button == 0 && (m_data->m_altPressed == 0 && m_data->m_controlPressed == 0))
+ 		{
++			m_data->m_np->updateTopLevelAS();
++
+ 			b3AlignedObjectArray<b3RayInfo> rays;
+ 			b3AlignedObjectArray<b3RayHit> hitResults;
+ 			b3Vector3 camPos;
+@@ -405,14 +411,13 @@ bool GpuRigidBodyDemo::mouseButtonCallback(int button, int state, float x, float
+ 			b3RayHit hit;
+ 			hit.m_hitFraction = 1.f;
+ 			hitResults.push_back(hit);
+-			m_data->m_rigidBodyPipeline->castRays(rays, hitResults);
++			m_data->m_rigidBodyPipeline->castRaysVk(rays, hitResults, true);
+ 			if (hitResults[0].m_hitFraction < 1.f)
+ 			{
+ 				int hitBodyA = hitResults[0].m_hitBody;
+ 				if (m_data->m_np->getBodiesCpu()[hitBodyA].m_invMass)
+ 				{
+ 					//printf("hit!\n");
+-					m_data->m_np->readbackAllBodiesToCpu();
+ 					m_data->m_pickBody = hitBodyA;
+ 
+ 					//pivotInA
+diff --git a/examples/OpenGLWindow/GLInstancingRenderer.cpp b/examples/OpenGLWindow/GLInstancingRenderer.cpp
+index 66bd5bf44..e913e51ac 100644
+--- a/examples/OpenGLWindow/GLInstancingRenderer.cpp
++++ b/examples/OpenGLWindow/GLInstancingRenderer.cpp
+@@ -311,7 +311,7 @@ static GLint points_colourIn = 0;
+ static GLint points_colour = 0;
+ GLuint pointsVertexBufferObject = 0;
+ GLuint pointsVertexArrayObject = 0;
+-GLuint pointsIndexVbo = 0;
++GLuint pointsColourBufferObject = 0;
+ 
+ static GLint lines_ModelViewMatrix = 0;
+ static GLint lines_ProjectionMatrix = 0;
+@@ -1279,12 +1279,15 @@ void GLInstancingRenderer::InitShaders()
+ 			glBindVertexArray(pointsVertexArrayObject);
+ 
+ 			glGenBuffers(1, &pointsVertexBufferObject);
+-			glGenBuffers(1, &pointsIndexVbo);
++			glGenBuffers(1, &pointsColourBufferObject);
+ 
+ 			int sz = MAX_POINTS_IN_BATCH * sizeof(b3Vector3);
++			int sz1 = MAX_POINTS_IN_BATCH * sizeof(b3Vector4);
+ 			glBindVertexArray(pointsVertexArrayObject);
+ 			glBindBuffer(GL_ARRAY_BUFFER, pointsVertexBufferObject);
+ 			glBufferData(GL_ARRAY_BUFFER, sz, 0, GL_DYNAMIC_DRAW);
++			glBindBuffer(GL_ARRAY_BUFFER, pointsColourBufferObject);
++			glBufferData(GL_ARRAY_BUFFER, sz1, 0, GL_DYNAMIC_DRAW);
+ 
+ 			glBindVertexArray(0);
+ 		}
+@@ -1968,7 +1971,7 @@ void GLInstancingRenderer::drawPoints(const float* positions, const float* color
+ 			glEnableVertexAttribArray(points_position);
+ 			glVertexAttribPointer(points_position, 3, GL_FLOAT, GL_FALSE, pointStrideInBytes, 0);
+ 
+-			glBindBuffer(GL_ARRAY_BUFFER, pointsVertexArrayObject);
++			glBindBuffer(GL_ARRAY_BUFFER, pointsColourBufferObject);
+ 			glBufferSubData(GL_ARRAY_BUFFER, 0, curPointsInBatch * 4 * sizeof(float), colors + offsetNumPoints * 4);
+ 			glEnableVertexAttribArray(points_colourIn);
+ 			glVertexAttribPointer(points_colourIn, 4, GL_FLOAT, GL_FALSE, 4 * sizeof(float), 0);
+diff --git a/src/Bullet3OpenCL/Initialize/b3VulkanUtils.h b/src/Bullet3OpenCL/Initialize/b3VulkanUtils.h
+new file mode 100644
+index 000000000..422a14f28
+--- /dev/null
++++ b/src/Bullet3OpenCL/Initialize/b3VulkanUtils.h
+@@ -0,0 +1,91 @@
++// Vulkan
++
++#ifndef B3_VULKAN_UTILS
++#define B3_VULKAN_UTILS
++
++#include "vulkan/vulkan_core.h"
++#define GLM_ENABLE_EXPERIMENTAL
++#include <glm/gtc/matrix_transform.hpp>
++#include <glm/gtc/quaternion.hpp>
++#include <glm/gtx/quaternion.hpp>
++#include "nvvk/context_vk.hpp"
++#include "nvvk/raytraceKHR_vk.hpp"
++#include "nvvk/buffers_vk.hpp"
++#include "nvvk/resourceallocator_vk.hpp"
++#include <iostream>
++
++const std::vector<std::string> shaderPaths = {
++    "..",
++    ".\\..\\..\\src\\Bullet3OpenCL\\Raycast\\shaders",
++    ".\\shaders",
++    "..\\src\\Bullet3OpenCL\\Raycast\\shaders",
++    ".\\src\\Bullet3OpenCL\\Raycast\\shaders"
++};
++
++const std::vector<const char*> validationLayers = {
++    "VK_LAYER_KHRONOS_validation"
++};
++
++#ifdef _DEBUG
++const bool enableValidationLayers = true;
++#else
++const bool enableValidationLayers = false;
++#endif
++
++struct b3VulkanContext {
++	VkInstance m_instance;
++	VkDevice m_device;
++	VkPhysicalDevice m_physicalDevice;
++	uint32_t m_queueIndex;
++	VkQueue m_queue;
++	VkCommandPool cmdPool;
++
++    VkDebugUtilsMessengerEXT debugMessenger;
++
++	nvvk::ResourceAllocatorDma* m_pAlloc; // TODO: may need to replace this without DMA
++	nvvk::RaytracingBuilderKHR* m_pRtBuilder;
++    nvvk::DebugUtil m_debug;
++
++    static VkResult CreateDebugUtilsMessengerEXT(VkInstance instance, const VkDebugUtilsMessengerCreateInfoEXT* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkDebugUtilsMessengerEXT* pDebugMessenger) {
++        auto func = (PFN_vkCreateDebugUtilsMessengerEXT) vkGetInstanceProcAddr(instance, "vkCreateDebugUtilsMessengerEXT");
++        if (func != nullptr) {
++            return func(instance, pCreateInfo, pAllocator, pDebugMessenger);
++        } else {
++            return VK_ERROR_EXTENSION_NOT_PRESENT;
++        }
++    }
++
++    static void DestroyDebugUtilsMessengerEXT(VkInstance instance, VkDebugUtilsMessengerEXT debugMessenger, const VkAllocationCallbacks* pAllocator) {
++        auto func = (PFN_vkDestroyDebugUtilsMessengerEXT) vkGetInstanceProcAddr(instance, "vkDestroyDebugUtilsMessengerEXT");
++        if (func != nullptr) {
++            func(instance, debugMessenger, pAllocator);
++        }
++    }
++
++    static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity, VkDebugUtilsMessageTypeFlagsEXT messageType, const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData, void* pUserData) {
++        std::cerr << "validation layer: " << pCallbackData->pMessage << std::endl;
++
++        return VK_FALSE;
++    }
++
++    static void populateDebugMessengerCreateInfo(VkDebugUtilsMessengerCreateInfoEXT& createInfo) {
++        createInfo = {};
++        createInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
++        createInfo.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
++        createInfo.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
++        createInfo.pfnUserCallback = debugCallback;
++    }
++
++    void setupDebugMessenger() {
++        if (!enableValidationLayers) return;
++
++        VkDebugUtilsMessengerCreateInfoEXT createInfo;
++        populateDebugMessengerCreateInfo(createInfo);
++
++        if (CreateDebugUtilsMessengerEXT(m_instance, &createInfo, nullptr, &debugMessenger) != VK_SUCCESS) {
++            throw std::runtime_error("failed to set up debug messenger!");
++        }
++    }
++};
++
++#endif
+\ No newline at end of file
+diff --git a/src/Bullet3OpenCL/Raycast/b3GpuRaycast.cpp b/src/Bullet3OpenCL/Raycast/b3GpuRaycast.cpp
+index 6571f3054..cdd972b24 100644
+--- a/src/Bullet3OpenCL/Raycast/b3GpuRaycast.cpp
++++ b/src/Bullet3OpenCL/Raycast/b3GpuRaycast.cpp
+@@ -25,6 +25,12 @@ struct b3GpuRaycastInternalData
+ 	cl_kernel m_raytracePairsKernel;
+ 	cl_kernel m_findRayRigidPairIndexRanges;
+ 
++	b3VulkanContext m_vkContext;
++	VkPipeline m_pipeline;
++	VkPipelineLayout m_pipelineLayout;
++	VkDescriptorSetLayout m_descriptorSetLayout;
++	VkShaderModule m_shader_module;
++
+ 	b3GpuParallelLinearBvh* m_plbvh;
+ 	b3RadixSort32CL* m_radixSorter;
+ 	b3FillCL* m_fill;
+@@ -42,7 +48,7 @@ struct b3GpuRaycastInternalData
+ 	int m_test;
+ };
+ 
+-b3GpuRaycast::b3GpuRaycast(cl_context ctx, cl_device_id device, cl_command_queue q)
++b3GpuRaycast::b3GpuRaycast(cl_context ctx, cl_device_id device, cl_command_queue q, b3VulkanContext vkContext)
+ {
+ 	m_data = new b3GpuRaycastInternalData;
+ 	m_data->m_context = ctx;
+@@ -52,6 +58,98 @@ b3GpuRaycast::b3GpuRaycast(cl_context ctx, cl_device_id device, cl_command_queue
+ 	m_data->m_raytracePairsKernel = 0;
+ 	m_data->m_findRayRigidPairIndexRanges = 0;
+ 
++	m_data->m_vkContext = vkContext;
++
++	auto shader = nvh::loadFile("vk_raycast_comp.spv", true, shaderPaths, true);
++	if (shader == "") {
++		throw std::runtime_error("Could not find Vulkan ray cast shader");
++	}
++	VkShaderModuleCreateInfo shaderModuleCreateInfo = {
++        VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,      // VkStructureType              sType;
++        0,                                                // const void*                  pNext;
++        0,                                                // VkShaderModuleCreateFlags    flags;
++        shader.size(),                                    // size_t                       codeSize;
++        reinterpret_cast<const uint32_t*>(shader.data())  // const uint32_t*              pCode;
++    };
++
++	if (vkCreateShaderModule(vkContext.m_device, &shaderModuleCreateInfo, 0, &(m_data->m_shader_module)) != VK_SUCCESS) {
++		b3Error("failed to create raycast shader module!");
++	}
++
++    VkDescriptorSetLayoutBinding descriptorSetLayoutBindings[3] = {
++        {
++            0,												// uint32_t              binding;
++            VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR,  // VkDescriptorType      descriptorType;
++            1,												// uint32_t              descriptorCount;
++            VK_SHADER_STAGE_COMPUTE_BIT,					// VkShaderStageFlags    stageFlags;
++            0												// const VkSampler*      pImmutableSamplers;
++        },
++		{
++			1,
++			VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
++			1,
++			VK_SHADER_STAGE_COMPUTE_BIT,
++			0
++		},
++		{
++			2,
++			VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
++			1,
++			VK_SHADER_STAGE_COMPUTE_BIT,
++			0
++		}
++    };
++
++    VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo = {
++        VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,  // VkStructureType                        sType;
++        0,                                                    // const void*                            pNext;
++        0,                                                    // VkDescriptorSetLayoutCreateFlags       flags;
++        3,                                                    // uint32_t                               bindingCount;
++        descriptorSetLayoutBindings                           // const VkDescriptorSetLayoutBinding*    pBindings;
++    };
++
++	if (vkCreateDescriptorSetLayout(vkContext.m_device, &descriptorSetLayoutCreateInfo, 0, &(m_data->m_descriptorSetLayout)) != VK_SUCCESS) {
++		b3Error("failed to create raycast descriptor set layout");
++	}
++
++	// add pushConstantsRange here
++    VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = {
++        VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,  // VkStructureType                 sType;
++        0,                                              // const void*                     pNext;
++        0,                                              // VkPipelineLayoutCreateFlags     flags;
++        1,                                              // uint32_t                        setLayoutCount;
++        &(m_data->m_descriptorSetLayout),               // const VkDescriptorSetLayout*    pSetLayouts;
++        0,                                              // uint32_t                        pushConstantRangeCount;
++        0                                               // const VkPushConstantRange*      pPushConstantRanges;
++    };
++
++	if (vkCreatePipelineLayout(vkContext.m_device, &pipelineLayoutCreateInfo, 0, &(m_data->m_pipelineLayout)) != VK_SUCCESS) {
++		b3Error("failed to create raycast pipeline layout");
++	}
++
++    VkComputePipelineCreateInfo computePipelineCreateInfo = {
++        VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO, // VkStructureType                    sType;
++        0,                                              // const void*                        pNext;
++        0,                                              // VkPipelineCreateFlags              flags;
++        {
++            // VkPipelineShaderStageCreateInfo    stage;
++            VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,  // VkStructureType                     sType;
++            0,                                                    // const void*                         pNext;
++            0,                                                    // VkPipelineShaderStageCreateFlags    flags;
++            VK_SHADER_STAGE_COMPUTE_BIT,                          // VkShaderStageFlagBits               stage;
++            m_data->m_shader_module,                              // VkShaderModule                      module;
++            "main",                                               // const char*                         pName;
++            0                                                     // const VkSpecializationInfo*         pSpecializationInfo;
++        },
++        m_data->m_pipelineLayout,                       // VkPipelineLayout                   layout;
++        0,                                              // VkPipeline                         basePipelineHandle;
++        0                                               // int32_t                            basePipelineIndex;
++    };
++
++    if (vkCreateComputePipelines(vkContext.m_device, 0, 1, &computePipelineCreateInfo, 0, &(m_data->m_pipeline)) != VK_SUCCESS) {
++		b3Error("failed to create raycast pipeline");
++	}
++
+ 	m_data->m_plbvh = new b3GpuParallelLinearBvh(ctx, device, q);
+ 	m_data->m_radixSorter = new b3RadixSort32CL(ctx, device, q);
+ 	m_data->m_fill = new b3FillCL(ctx, device, q);
+@@ -83,6 +181,12 @@ b3GpuRaycast::~b3GpuRaycast()
+ 	clReleaseKernel(m_data->m_raytracePairsKernel);
+ 	clReleaseKernel(m_data->m_findRayRigidPairIndexRanges);
+ 
++	// TODO: clear raycast compute pipeline
++    vkDestroyPipeline(m_data->m_vkContext.m_device, m_data->m_pipeline, NULL);
++    vkDestroyPipelineLayout(m_data->m_vkContext.m_device, m_data->m_pipelineLayout, NULL);
++    vkDestroyDescriptorSetLayout(m_data->m_vkContext.m_device, m_data->m_descriptorSetLayout, NULL);
++    vkDestroyShaderModule(m_data->m_vkContext.m_device, m_data->m_shader_module, NULL);
++
+ 	delete m_data->m_plbvh;
+ 	delete m_data->m_radixSorter;
+ 	delete m_data->m_fill;
+@@ -245,6 +349,175 @@ void b3GpuRaycast::castRaysHost(const b3AlignedObjectArray<b3RayInfo>& rays, b3A
+ 		}
+ 	}
+ }
++
++void b3GpuRaycast::castRaysVk(const b3AlignedObjectArray<b3RayInfo>& rays, b3AlignedObjectArray<b3RayHit>& hitResults,
++	int numBodies, const struct b3RigidBodyData* bodies, int numCollidables, const struct b3Collidable* collidables,
++	const struct b3GpuNarrowPhaseInternalData* narrowphaseData, class b3GpuBroadphaseInterface* broadphase) {
++
++	int nbRays = rays.size();
++	nvvk::ResourceAllocatorDma& m_alloc = *(m_data->m_vkContext.m_pAlloc);
++
++	VkDescriptorPoolSize descriptorPoolSize[2] = {
++		{
++			VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR,  // VkDescriptorType    type;
++			1												// uint32_t            descriptorCount;
++		},
++		{
++			VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
++			2
++		}
++    };
++
++    VkDescriptorPoolCreateInfo descriptorPoolCreateInfo = {
++        VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,  // VkStructureType                sType;
++        0,                                              // const void*                    pNext;
++        0,                                              // VkDescriptorPoolCreateFlags    flags;
++        1,                                              // uint32_t                       maxSets;
++        2,                                              // uint32_t                       poolSizeCount;
++        descriptorPoolSize                              // const VkDescriptorPoolSize*    pPoolSizes;
++    };
++
++    VkDescriptorPool descriptorPool;
++	if (vkCreateDescriptorPool(m_data->m_vkContext.m_device, &descriptorPoolCreateInfo, 0, &descriptorPool) != VK_SUCCESS) {
++		b3Error("failed to create descriptor pool");
++	}
++
++    VkDescriptorSetAllocateInfo descriptorSetAllocateInfo = {
++        VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO, // VkStructureType                 sType;
++        0,                                              // const void*                     pNext;
++        descriptorPool,                                 // VkDescriptorPool                descriptorPool;
++        1,                                              // uint32_t                        descriptorSetCount;
++        &(m_data->m_descriptorSetLayout)                // const VkDescriptorSetLayout*    pSetLayouts;
++    };
++
++    VkDescriptorSet descriptorSet;
++    if (vkAllocateDescriptorSets(m_data->m_vkContext.m_device, &descriptorSetAllocateInfo, &descriptorSet) != VK_SUCCESS) {
++		b3Error("failed to create descriptor set");
++	}
++
++	// begin invocation of raycast compute shader
++	nvvk::CommandPool cmdBufGet(m_data->m_vkContext.m_device, m_data->m_vkContext.m_queueIndex);
++	VkCommandBuffer cmdBuf = cmdBufGet.createCommandBuffer();
++
++	auto tlas = m_data->m_vkContext.m_pRtBuilder->getAccelerationStructure();
++	VkWriteDescriptorSetAccelerationStructureKHR descASInfo{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR};
++	descASInfo.accelerationStructureCount = 1;
++	descASInfo.pAccelerationStructures    = &tlas;
++
++	auto flag = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
++	std::vector<b3RayInfo> raysVector;
++	std::vector<b3RayHit> hitsVector;
++	raysVector.reserve(nbRays);
++	hitsVector.reserve(nbRays);
++	int i;
++	for (i = 0; i < nbRays; ++i) {
++		raysVector.push_back(rays.at(i));
++		hitsVector.push_back(b3RayHit());
++	}
++
++	nvvk::Buffer rayInfoBuffer = m_alloc.createBuffer(cmdBuf, raysVector, flag);
++	nvvk::Buffer rayHitBuffer = m_alloc.createBuffer(cmdBuf, hitsVector, flag | VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
++	nvvk::Buffer rayHitBufferCPU = m_alloc.createBuffer(cmdBuf, hitsVector,
++		VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
++		VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
++
++    VkDescriptorBufferInfo in_descriptorBufferInfo = {
++        rayInfoBuffer.buffer,
++        0,            // VkDeviceSize    offset;
++        VK_WHOLE_SIZE // VkDeviceSize    range;
++    };
++
++    VkDescriptorBufferInfo out_descriptorBufferInfo = {
++        rayHitBuffer.buffer,
++        0,             // VkDeviceSize    offset;
++        VK_WHOLE_SIZE  // VkDeviceSize    range;
++    };
++
++    VkWriteDescriptorSet writeDescriptorSet[3] = {
++        {
++            VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,			// VkStructureType                  sType;
++            &descASInfo,									// const void*                      pNext;
++            descriptorSet,									// VkDescriptorSet                  dstSet;
++            0,												// uint32_t                         dstBinding;
++            0,												// uint32_t                         dstArrayElement;
++            1,												// uint32_t                         descriptorCount;
++            VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR,	// VkDescriptorType                 descriptorType;
++            0,												// const VkDescriptorImageInfo*     pImageInfo;
++            0,												// const VkDescriptorBufferInfo*    pBufferInfo;
++            0												// const VkBufferView*              pTexelBufferView;
++        },
++        {
++            VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, // VkStructureType                  sType;
++            0,                                      // const void*                      pNext;
++            descriptorSet,                          // VkDescriptorSet                  dstSet;
++            1,                                      // uint32_t                         dstBinding;
++            0,                                      // uint32_t                         dstArrayElement;
++            1,                                      // uint32_t                         descriptorCount;
++            VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,      // VkDescriptorType                 descriptorType;
++            0,                                      // const VkDescriptorImageInfo*     pImageInfo;
++            &in_descriptorBufferInfo,               // const VkDescriptorBufferInfo*    pBufferInfo;
++            0                                       // const VkBufferView*              pTexelBufferView;
++        },
++        {
++            VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, // VkStructureType                  sType;
++            0,                                      // const void*                      pNext;
++            descriptorSet,                          // VkDescriptorSet                  dstSet;
++            2,                                      // uint32_t                         dstBinding;
++            0,                                      // uint32_t                         dstArrayElement;
++            1,                                      // uint32_t                         descriptorCount;
++            VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,      // VkDescriptorType                 descriptorType;
++            0,                                      // const VkDescriptorImageInfo*     pImageInfo;
++            &out_descriptorBufferInfo,              // const VkDescriptorBufferInfo*    pBufferInfo;
++            0                                       // const VkBufferView*              pTexelBufferView;
++        }
++    };
++
++    vkUpdateDescriptorSets(m_data->m_vkContext.m_device, 3, writeDescriptorSet, 0, 0);
++
++	vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, m_data->m_pipeline);
++
++	vkCmdBindDescriptorSets(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE,
++		m_data->m_pipelineLayout, 0, 1, &descriptorSet, 0, 0);
++
++	vkCmdDispatch(cmdBuf, nbRays, 1, 1);
++
++	VkBufferCopy copyRegion = {};
++	copyRegion.srcOffset = 0;
++	copyRegion.dstOffset = 0;
++	copyRegion.size = nbRays * sizeof(b3RayHit);
++
++	vkCmdCopyBuffer(cmdBuf, rayHitBuffer.buffer, rayHitBufferCPU.buffer, 1, &copyRegion);
++
++	cmdBufGet.submitAndWait(cmdBuf);
++	m_alloc.finalizeAndReleaseStaging();
++
++	b3RayHit* rayHitsCPU = reinterpret_cast<b3RayHit*>(m_alloc.map(rayHitBufferCPU));
++	hitResults.clear();
++	for (i = 0; i < nbRays; ++i) {
++		b3RayHit rayHit = rayHitsCPU[i];
++		if (rayHit.m_hitBody >= 0) {
++			// hit
++			// transform object-space hit position to world-space
++			const auto& rayHitPos = rayHit.m_hitPoint;
++			glm::vec3 offset = {rayHitPos.x, rayHitPos.y, rayHitPos.z};
++			auto& inst = narrowphaseData->m_bodyBufferCPU->at(rayHit.m_hitBody);
++			glm::vec3 position = { inst.m_pos.x, inst.m_pos.y, inst.m_pos.z };
++			glm::quat rotation(inst.m_quat.w, inst.m_quat.x, inst.m_quat.y, inst.m_quat.z);
++			auto worldHitPos = position + rotation * offset;
++			rayHit.m_hitPoint = b3MakeVector3(worldHitPos.x, worldHitPos.y, worldHitPos.z);
++			// calculate hitFraction
++			rayHit.m_hitFraction = b3Distance(rays[i].m_from, rayHit.m_hitPoint) / b3Distance(rays[i].m_from, rays[i].m_to);
++		}
++		hitResults.push_back(rayHit);
++	}
++	m_alloc.unmap(rayHitBufferCPU);
++
++	m_alloc.destroy(rayInfoBuffer);
++	m_alloc.destroy(rayHitBuffer);
++	m_alloc.destroy(rayHitBufferCPU);
++	vkDestroyDescriptorPool(m_data->m_vkContext.m_device, descriptorPool, NULL);
++}
++
+ ///todo: add some acceleration structure (AABBs, tree etc)
+ void b3GpuRaycast::castRays(const b3AlignedObjectArray<b3RayInfo>& rays, b3AlignedObjectArray<b3RayHit>& hitResults,
+ 							int numBodies, const struct b3RigidBodyData* bodies, int numCollidables, const struct b3Collidable* collidables,
+@@ -266,7 +539,7 @@ void b3GpuRaycast::castRays(const b3AlignedObjectArray<b3RayInfo>& rays, b3Align
+ 		m_data->m_numRayRigidPairsPerRay->resize(numRays);
+ 
+ 		m_data->m_gpuNumRayRigidPairs->resize(1);
+-		m_data->m_gpuRayRigidPairs->resize(numRays * 16);
++		m_data->m_gpuRayRigidPairs->resize(numRays * 80);
+ 	}
+ 
+ 	//run kernel
+diff --git a/src/Bullet3OpenCL/Raycast/b3GpuRaycast.h b/src/Bullet3OpenCL/Raycast/b3GpuRaycast.h
+index f1f6ffd40..341554ddd 100644
+--- a/src/Bullet3OpenCL/Raycast/b3GpuRaycast.h
++++ b/src/Bullet3OpenCL/Raycast/b3GpuRaycast.h
+@@ -7,19 +7,27 @@
+ #include "Bullet3Common/b3AlignedObjectArray.h"
+ #include "Bullet3Collision/NarrowPhaseCollision/b3RaycastInfo.h"
+ 
++// # Vulkan
++#include "Bullet3OpenCL/Initialize/b3VulkanUtils.h"
++#include "nvh/fileoperations.hpp"
++
+ class b3GpuRaycast
+ {
+ protected:
+ 	struct b3GpuRaycastInternalData* m_data;
+ 
+ public:
+-	b3GpuRaycast(cl_context ctx, cl_device_id device, cl_command_queue q);
++	b3GpuRaycast(cl_context ctx, cl_device_id device, cl_command_queue q, b3VulkanContext vkContext);
+ 	virtual ~b3GpuRaycast();
+ 
+ 	void castRaysHost(const b3AlignedObjectArray<b3RayInfo>& raysIn, b3AlignedObjectArray<b3RayHit>& hitResults,
+ 					  int numBodies, const struct b3RigidBodyData* bodies, int numCollidables, const struct b3Collidable* collidables,
+ 					  const struct b3GpuNarrowPhaseInternalData* narrowphaseData);
+ 
++	void castRaysVk(const b3AlignedObjectArray<b3RayInfo>& rays, b3AlignedObjectArray<b3RayHit>& hitResults,
++				  int numBodies, const struct b3RigidBodyData* bodies, int numCollidables, const struct b3Collidable* collidables,
++				  const struct b3GpuNarrowPhaseInternalData* narrowphaseData, class b3GpuBroadphaseInterface* broadphase);
++
+ 	void castRays(const b3AlignedObjectArray<b3RayInfo>& rays, b3AlignedObjectArray<b3RayHit>& hitResults,
+ 				  int numBodies, const struct b3RigidBodyData* bodies, int numCollidables, const struct b3Collidable* collidables,
+ 				  const struct b3GpuNarrowPhaseInternalData* narrowphaseData, class b3GpuBroadphaseInterface* broadphase);
+diff --git a/src/Bullet3OpenCL/Raycast/shaders/vk_raycast.comp b/src/Bullet3OpenCL/Raycast/shaders/vk_raycast.comp
+new file mode 100644
+index 000000000..2c5450861
+--- /dev/null
++++ b/src/Bullet3OpenCL/Raycast/shaders/vk_raycast.comp
+@@ -0,0 +1,76 @@
++#version 460
++#extension GL_EXT_ray_tracing : enable
++#extension GL_EXT_ray_query : enable
++#extension GL_EXT_ray_tracing_position_fetch : enable
++
++struct RayInfo {
++	vec3 m_from;
++	vec3 m_to;
++};
++
++struct RayHit {
++	float m_hitFraction;
++	int m_hitBody;
++	int m_hitResult1;
++	int m_hitResult2;
++	vec3 m_hitPoint;
++	vec3 m_hitNormal;
++};
++
++struct RayQueryHit {
++	int hitBody;
++	vec3 hitPosObjSpace;
++	vec3 hitNormal;
++};
++
++layout(set = 0, binding = 0) uniform accelerationStructureEXT topLevelAS;
++
++layout(set = 0, binding = 1) readonly buffer RayInfoBuffer {
++    RayInfo rays[];
++};
++
++layout(set = 0, binding = 2) writeonly buffer RayHitBuffer {
++	RayHit rayHits[];
++};
++
++vec3 getHitPosition(vec3 vertices[3], vec2 baryUV) {
++    float u = baryUV.x;
++    float v = baryUV.y;
++    float w = 1.0 - u - v; // The third barycentric weight
++
++    return u * vertices[1] + v * vertices[2] + w * vertices[0];
++}
++
++void main() {
++
++    uint index = gl_GlobalInvocationID.x;
++
++	RayInfo ray = rays[index];
++	vec3 origin = ray.m_from;
++	vec3 direction = normalize(ray.m_to - ray.m_from);
++
++	float tMin      = 0.01f;
++	float tMax      = length(ray.m_to - ray.m_from) + 0.01f;
++	
++	rayQueryEXT rayQuery;
++	rayQueryInitializeEXT(rayQuery, topLevelAS, gl_RayFlagsOpaqueEXT | gl_RayFlagsCullBackFacingTrianglesEXT, 0xFF, origin, tMin, direction, tMax);
++	
++	rayHits[index].m_hitPoint = origin;
++	rayHits[index].m_hitNormal = direction;
++
++	// Start traversal: return false if traversal is complete
++	while(rayQueryProceedEXT(rayQuery)) {}
++
++	// Returns type of committed (true) intersection
++	if(rayQueryGetIntersectionTypeEXT(rayQuery, true) != gl_RayQueryCommittedIntersectionNoneEXT) {
++		// Got an intersection
++		int hitBodyIndex = rayQueryGetIntersectionInstanceIdEXT(rayQuery, true);
++		rayHits[index].m_hitBody = hitBodyIndex;
++		vec3 vertices[3];
++		rayQueryGetIntersectionTriangleVertexPositionsEXT(rayQuery, true, vertices);
++		vec2 barycentrics = rayQueryGetIntersectionBarycentricsEXT(rayQuery, true);
++		rayHits[index].m_hitPoint = getHitPosition(vertices, barycentrics);
++	} else {
++		rayHits[index].m_hitBody = -1;
++	}
++}
+\ No newline at end of file
+diff --git a/src/Bullet3OpenCL/RigidBody/b3GpuNarrowPhase.cpp b/src/Bullet3OpenCL/RigidBody/b3GpuNarrowPhase.cpp
+index 2e4f6c157..039b92ac8 100644
+--- a/src/Bullet3OpenCL/RigidBody/b3GpuNarrowPhase.cpp
++++ b/src/Bullet3OpenCL/RigidBody/b3GpuNarrowPhase.cpp
+@@ -15,8 +15,8 @@
+ #include "Bullet3OpenCL/NarrowphaseCollision/b3QuantizedBvh.h"
+ #include "Bullet3Collision/NarrowPhaseCollision/b3ConvexUtility.h"
+ 
+-b3GpuNarrowPhase::b3GpuNarrowPhase(cl_context ctx, cl_device_id device, cl_command_queue queue, const b3Config& config)
+-	: m_data(0), m_planeBodyIndex(-1), m_static0Index(-1), m_context(ctx), m_device(device), m_queue(queue)
++b3GpuNarrowPhase::b3GpuNarrowPhase(cl_context ctx, cl_device_id device, cl_command_queue queue, b3VulkanContext vkContext, const b3Config& config)
++	: m_data(0), m_planeBodyIndex(-1), m_static0Index(-1), m_context(ctx), m_device(device), m_queue(queue), m_vkContext(vkContext)
+ {
+ 	m_data = new b3GpuNarrowPhaseInternalData();
+ 	m_data->m_currentContactBuffer = 0;
+@@ -81,6 +81,9 @@ b3GpuNarrowPhase::b3GpuNarrowPhase(cl_context ctx, cl_device_id device, cl_comma
+ 	m_data->m_convexData->resize(config.m_maxConvexShapes);
+ 	m_data->m_convexPolyhedra.resize(config.m_maxConvexShapes);
+ 
++	m_data->m_vertexBuffersGPU = std::vector<nvvk::Buffer>();
++	m_data->m_indexBuffersGPU = std::vector<nvvk::Buffer>();
++
+ 	m_data->m_numAcceleratedShapes = 0;
+ 	m_data->m_numAcceleratedRigidBodies = 0;
+ 
+@@ -136,6 +139,22 @@ b3GpuNarrowPhase::~b3GpuNarrowPhase()
+ 	m_data->m_bvhData.clear();
+ 	delete m_data->m_treeNodesGPU;
+ 	delete m_data->m_subTreesGPU;
++	
++	const auto& convexUtilities = m_data->m_convexData;
++	const int nbConvexUtilities = convexUtilities->size();
++
++	int i;
++	for (i = 0; i < nbConvexUtilities; ++i) {
++		b3ConvexUtility*& convexUtility = convexUtilities->at(i);
++		if (convexUtility != nullptr)
++			delete convexUtility;
++	}
++	for (i = 0; i < m_data->m_vertexBuffersGPU.size(); ++i) {
++		m_vkContext.m_pAlloc->destroy(m_data->m_vertexBuffersGPU[i]);
++		m_vkContext.m_pAlloc->destroy(m_data->m_indexBuffersGPU[i]);
++	}
++	m_data->m_vertexBuffersGPU.clear();
++	m_data->m_indexBuffersGPU.clear();
+ 
+ 	delete m_data->m_convexData;
+ 	delete m_data;
+@@ -314,10 +333,96 @@ int b3GpuNarrowPhase::registerConvexHullShape(const float* vertices, int strideI
+ 	}
+ 
+ 	int collidableIndex = registerConvexHullShape(utilPtr);
+-	delete utilPtr;
++	//delete utilPtr;
+ 	return collidableIndex;
+ }
+ 
++nvvk::RaytracingBuilderKHR::BlasInput b3GpuNarrowPhase::objectToVkGeometry(int modelIndex) {
++	nvvk::DebugUtil& m_debug = m_vkContext.m_debug;
++
++	b3ConvexUtility* model = (m_data->m_convexData)->at(modelIndex);
++	int nbVertices = model->m_vertices.size();
++	int i;
++
++	int nbFaces = model->m_faces.size();
++	std::vector<int> m_indices(nbFaces * 3); // initial capacity is a lower-bound estimation
++	int f;
++	for (f = 0; f < nbFaces; ++f) {
++		const b3MyFace& face = model->m_faces[f];
++		const auto& faceIndices = face.m_indices;
++		const int nbFaceIndices = faceIndices.size();
++		// triangle-fan decomposition of polygons starting from vertex 0
++		// less ideal the more indices there are over 4
++		// also less ideal in quadrilateral case if far from a square (elongated)
++		for (i = 1; i < nbFaceIndices - 1; ++i) {
++			m_indices.push_back(faceIndices[0]);
++			m_indices.push_back(faceIndices[i]);
++			m_indices.push_back(faceIndices[i + 1]);
++		}
++	}
++	int nbIndices = m_indices.size();
++
++	//// Create the buffers on Device and copy vertices/indices
++	nvvk::CommandPool cmdBufGet(m_vkContext.m_device, m_vkContext.m_queueIndex);
++	VkCommandBuffer cmdBuf = cmdBufGet.createCommandBuffer();
++
++	VkBufferUsageFlags flag = VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
++	VkBufferUsageFlags rayTracingFlags = // used also for building acceleration structures
++		flag | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
++	
++	nvvk::Buffer vertexBuffer = (m_vkContext.m_pAlloc)->createBuffer(cmdBuf, sizeof(b3Vector3) * nbVertices, &(model->m_vertices.at(0)), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | rayTracingFlags);
++	nvvk::Buffer indexBuffer = (m_vkContext.m_pAlloc)->createBuffer(cmdBuf, m_indices, VK_BUFFER_USAGE_INDEX_BUFFER_BIT | rayTracingFlags);
++	
++	const int& nbObj = m_data->m_vertexBuffersGPU.size();
++	std::string label = std::to_string(nbObj);
++	m_debug.setObjectName(vertexBuffer.buffer, (std::string("vertex_") + label));
++	m_debug.setObjectName(indexBuffer.buffer, (std::string("index_") + label));
++
++	m_data->m_vertexBuffersGPU.emplace_back(vertexBuffer);
++	m_data->m_indexBuffersGPU.emplace_back(indexBuffer);
++
++	cmdBufGet.submitAndWait(cmdBuf);
++	(m_vkContext.m_pAlloc)->finalizeAndReleaseStaging();
++
++	// BLAS builder requires raw device addresses.
++	VkDeviceAddress vertexAddress = nvvk::getBufferDeviceAddress(m_vkContext.m_device, vertexBuffer.buffer);
++	VkDeviceAddress indexAddress  = nvvk::getBufferDeviceAddress(m_vkContext.m_device, indexBuffer.buffer);
++
++	uint32_t maxPrimitiveCount = nbIndices / 3;
++
++	// Describe buffer as array of VertexObj.
++	VkAccelerationStructureGeometryTrianglesDataKHR triangles{VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR};
++	triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT; // vec3 vertex position data.
++	triangles.vertexData.deviceAddress = vertexAddress;
++	triangles.vertexStride             = sizeof(b3Vector3);
++	// Describe index data (32-bit unsigned int)
++	triangles.indexType = VK_INDEX_TYPE_UINT32;
++	triangles.indexData.deviceAddress = indexAddress;
++	// Indicate identity transform by setting transformData to null device pointer.
++	//triangles.transformData = {};
++	triangles.maxVertex = nbVertices - 1;
++
++	// Identify the above data as containing opaque triangles.
++	VkAccelerationStructureGeometryKHR asGeom{VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR};
++	asGeom.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
++	asGeom.flags        = VK_GEOMETRY_OPAQUE_BIT_KHR;
++	asGeom.geometry.triangles = triangles;
++
++	// The entire array will be used to build the BLAS.
++	VkAccelerationStructureBuildRangeInfoKHR offset;
++	offset.firstVertex = 0;
++	offset.primitiveCount = maxPrimitiveCount;
++	offset.primitiveOffset = 0;
++	offset.transformOffset = 0;
++
++	// Our blas is made from only one geometry, but could be made of many geometries
++	nvvk::RaytracingBuilderKHR::BlasInput input;
++	input.asGeometry.emplace_back(asGeom);
++	input.asBuildOffsetInfo.emplace_back(offset);
++
++	return input;
++}
++
+ int b3GpuNarrowPhase::registerConvexHullShape(b3ConvexUtility* utilPtr)
+ {
+ 	int collidableIndex = allocateCollidable();
+@@ -912,6 +1017,82 @@ int b3GpuNarrowPhase::getNumRigidBodies() const
+ 	return m_data->m_numAcceleratedRigidBodies;
+ }
+ 
++void b3GpuNarrowPhase::createBottomLevelAS() {
++	const auto& convexUtilities = m_data->m_convexData;
++	const int nbConvexUtilities = convexUtilities->size();
++	const int nbBlas = m_data->m_vertexBuffersGPU.size();
++	std::vector<nvvk::RaytracingBuilderKHR::BlasInput> allBlas;
++	allBlas.reserve(nbConvexUtilities);
++
++	int i;
++	for (i = nbBlas; i < nbConvexUtilities; ++i) {
++		b3ConvexUtility*& convexUtility = convexUtilities->at(i);
++		auto blas = objectToVkGeometry(i);
++		allBlas.emplace_back(blas);
++	}
++
++	(m_vkContext.m_pRtBuilder)->buildBlas(allBlas, VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_BUILD_BIT_KHR);
++}
++
++void b3GpuNarrowPhase::createTopLevelAS() {
++	std::vector<VkAccelerationStructureInstanceKHR> tlas;
++	auto& m_instances = m_data->m_bodyBufferCPU;
++	int nbInstances = m_instances->size();
++	tlas.reserve(nbInstances);
++	int i;
++	for (i = 0; i < nbInstances; ++i) {
++		const b3RigidBodyData inst = m_instances->at(i);
++		int collidableIndex = inst.m_collidableIdx;
++
++		VkAccelerationStructureInstanceKHR rayInst{};
++		glm::mat4 transform = glm::mat4(1.0f);
++		glm::vec3 position = { inst.m_pos.x, inst.m_pos.y, inst.m_pos.z };
++		glm::quat rotation(inst.m_quat.w, inst.m_quat.x, inst.m_quat.y, inst.m_quat.z);
++		transform = glm::translate(transform, position) * glm::toMat4(rotation);
++		rayInst.transform                      = nvvk::toTransformMatrixKHR(transform);  // Position of the instance
++		rayInst.instanceCustomIndex            = collidableIndex;                               // gl_InstanceCustomIndexEXT
++		rayInst.accelerationStructureReference = (m_vkContext.m_pRtBuilder)->getBlasDeviceAddress(collidableIndex);
++		//rayInst.flags                          = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
++		rayInst.mask                           = 0xFF;       //  Only be hit if rayMask & instance.mask != 0
++		rayInst.instanceShaderBindingTableRecordOffset = 0;  // We will use the same hit group for all objects
++		tlas.emplace_back(rayInst);
++	}
++	(m_vkContext.m_pRtBuilder)->buildTlas(tlas, VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_BUILD_BIT_KHR | VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR);
++}
++
++void b3GpuNarrowPhase::updateTopLevelAS() {
++	std::vector<VkAccelerationStructureInstanceKHR> tlas;
++	auto& m_instances = m_data->m_bodyBufferCPU;
++	int nbInstances = m_instances->size();
++	int nbShapes = m_data->m_vertexBuffersGPU.size();
++	tlas.reserve(nbInstances);
++	int i;
++
++	readbackAllBodiesToCpu();
++
++	for (i = 0; i < nbInstances; ++i) {
++		const b3RigidBodyData inst = m_instances->at(i);
++		int collidableIndex = inst.m_collidableIdx;
++
++		if (collidableIndex >= nbShapes)
++			continue;
++
++		VkAccelerationStructureInstanceKHR rayInst{};
++		glm::mat4 transform = glm::mat4(1.0f);
++		glm::vec3 position = { inst.m_pos.x, inst.m_pos.y, inst.m_pos.z };
++		glm::quat rotation(inst.m_quat.w, inst.m_quat.x, inst.m_quat.y, inst.m_quat.z);
++		transform = glm::translate(transform, position) * glm::toMat4(rotation);
++		rayInst.transform                      = nvvk::toTransformMatrixKHR(transform);  // Position of the instance
++		rayInst.instanceCustomIndex            = collidableIndex;                        // gl_InstanceCustomIndexEXT
++		rayInst.accelerationStructureReference = (m_vkContext.m_pRtBuilder)->getBlasDeviceAddress(collidableIndex);
++		//rayInst.flags                          = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
++		rayInst.mask                           = 0xFF;       //  Only be hit if rayMask & instance.mask != 0
++		rayInst.instanceShaderBindingTableRecordOffset = 0;  // We will use the same hit group for all objects
++		tlas.emplace_back(rayInst);
++	}
++	(m_vkContext.m_pRtBuilder)->buildTlas(tlas, VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_BUILD_BIT_KHR | VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR, true);
++}
++
+ void b3GpuNarrowPhase::writeAllBodiesToGpu()
+ {
+ 	if (m_data->m_localShapeAABBCPU->size())
+diff --git a/src/Bullet3OpenCL/RigidBody/b3GpuNarrowPhase.h b/src/Bullet3OpenCL/RigidBody/b3GpuNarrowPhase.h
+index 21a68de34..e47942e5b 100644
+--- a/src/Bullet3OpenCL/RigidBody/b3GpuNarrowPhase.h
++++ b/src/Bullet3OpenCL/RigidBody/b3GpuNarrowPhase.h
+@@ -3,6 +3,7 @@
+ 
+ #include "Bullet3Collision/NarrowPhaseCollision/shared/b3Collidable.h"
+ #include "Bullet3OpenCL/Initialize/b3OpenCLInclude.h"
++#include "Bullet3OpenCL/Initialize/b3VulkanUtils.h"
+ #include "Bullet3Common/b3AlignedObjectArray.h"
+ #include "Bullet3Common/b3Vector3.h"
+ 
+@@ -18,11 +19,15 @@ protected:
+ 	cl_device_id m_device;
+ 	cl_command_queue m_queue;
+ 
++	b3VulkanContext m_vkContext;
++
+ 	int registerConvexHullShapeInternal(class b3ConvexUtility* convexPtr, b3Collidable& col);
+ 	int registerConcaveMeshShape(b3AlignedObjectArray<b3Vector3>* vertices, b3AlignedObjectArray<int>* indices, b3Collidable& col, const float* scaling);
+ 
++	nvvk::RaytracingBuilderKHR::BlasInput objectToVkGeometry(int convexDataIndex);
++
+ public:
+-	b3GpuNarrowPhase(cl_context vtx, cl_device_id dev, cl_command_queue q, const struct b3Config& config);
++	b3GpuNarrowPhase(cl_context vtx, cl_device_id dev, cl_command_queue q, b3VulkanContext vkContext, const struct b3Config& config);
+ 
+ 	virtual ~b3GpuNarrowPhase(void);
+ 
+@@ -42,6 +47,9 @@ public:
+ 	int registerRigidBody(int collidableIndex, float mass, const float* position, const float* orientation, const float* aabbMin, const float* aabbMax, bool writeToGpu);
+ 	void setObjectTransform(const float* position, const float* orientation, int bodyIndex);
+ 
++	void createBottomLevelAS();
++	void createTopLevelAS();
++	void updateTopLevelAS();
+ 	void writeAllBodiesToGpu();
+ 	void reset();
+ 	void readbackAllBodiesToCpu();
+diff --git a/src/Bullet3OpenCL/RigidBody/b3GpuNarrowPhaseInternalData.h b/src/Bullet3OpenCL/RigidBody/b3GpuNarrowPhaseInternalData.h
+index 716a5ea0f..1bef8bafd 100644
+--- a/src/Bullet3OpenCL/RigidBody/b3GpuNarrowPhaseInternalData.h
++++ b/src/Bullet3OpenCL/RigidBody/b3GpuNarrowPhaseInternalData.h
+@@ -26,6 +26,9 @@ struct b3GpuNarrowPhaseInternalData
+ {
+ 	b3AlignedObjectArray<b3ConvexUtility*>* m_convexData;
+ 
++	std::vector<nvvk::Buffer> m_vertexBuffersGPU;
++	std::vector<nvvk::Buffer> m_indexBuffersGPU;
++
+ 	b3AlignedObjectArray<b3ConvexPolyhedronData> m_convexPolyhedra;
+ 	b3AlignedObjectArray<b3Vector3> m_uniqueEdges;
+ 	b3AlignedObjectArray<b3Vector3> m_convexVertices;
+diff --git a/src/Bullet3OpenCL/RigidBody/b3GpuRigidBodyPipeline.cpp b/src/Bullet3OpenCL/RigidBody/b3GpuRigidBodyPipeline.cpp
+index fef33ad1c..893477b66 100644
+--- a/src/Bullet3OpenCL/RigidBody/b3GpuRigidBodyPipeline.cpp
++++ b/src/Bullet3OpenCL/RigidBody/b3GpuRigidBodyPipeline.cpp
+@@ -19,6 +19,7 @@ subject to the following restrictions:
+ #include "kernels/updateAabbsKernel.h"
+ 
+ #include "Bullet3OpenCL/Initialize/b3OpenCLUtils.h"
++#include "Bullet3OpenCL/Initialize/b3VulkanUtils.h"
+ #include "b3GpuNarrowPhase.h"
+ #include "Bullet3Geometry/b3AabbUtil.h"
+ #include "Bullet3OpenCL/BroadphaseCollision/b3SapAabb.h"
+@@ -62,7 +63,7 @@ bool gClearPairsOnGpu = true;
+ #include "Bullet3Dynamics/shared/b3IntegrateTransforms.h"
+ #include "Bullet3OpenCL/RigidBody/b3GpuNarrowPhaseInternalData.h"
+ 
+-b3GpuRigidBodyPipeline::b3GpuRigidBodyPipeline(cl_context ctx, cl_device_id device, cl_command_queue q, class b3GpuNarrowPhase* narrowphase, class b3GpuBroadphaseInterface* broadphaseSap, struct b3DynamicBvhBroadphase* broadphaseDbvt, const b3Config& config)
++b3GpuRigidBodyPipeline::b3GpuRigidBodyPipeline(cl_context ctx, cl_device_id device, cl_command_queue q, b3VulkanContext vkContext, class b3GpuNarrowPhase* narrowphase, class b3GpuBroadphaseInterface* broadphaseSap, struct b3DynamicBvhBroadphase* broadphaseDbvt, const b3Config& config)
+ {
+ 	m_data = new b3GpuRigidBodyPipelineInternalData;
+ 	m_data->m_constraintUid = 0;
+@@ -71,6 +72,8 @@ b3GpuRigidBodyPipeline::b3GpuRigidBodyPipeline(cl_context ctx, cl_device_id devi
+ 	m_data->m_device = device;
+ 	m_data->m_queue = q;
+ 
++	m_data->m_vkContext = vkContext;
++
+ 	m_data->m_solver = new b3PgsJacobiSolver(true);                            //new b3PgsJacobiSolver(true);
+ 	m_data->m_gpuSolver = new b3GpuPgsConstraintSolver(ctx, device, q, true);  //new b3PgsJacobiSolver(true);
+ 
+@@ -84,7 +87,7 @@ b3GpuRigidBodyPipeline::b3GpuRigidBodyPipeline(cl_context ctx, cl_device_id devi
+ 
+ 	m_data->m_solver2 = new b3GpuPgsContactSolver(ctx, device, q, config.m_maxBroadphasePairs);
+ 
+-	m_data->m_raycaster = new b3GpuRaycast(ctx, device, q);
++	m_data->m_raycaster = new b3GpuRaycast(ctx, device, q, vkContext);
+ 
+ 	m_data->m_broadphaseDbvt = broadphaseDbvt;
+ 	m_data->m_broadphaseSap = broadphaseSap;
+@@ -675,3 +678,13 @@ void b3GpuRigidBodyPipeline::castRays(const b3AlignedObjectArray<b3RayInfo>& ray
+ 										m_data->m_narrowphase->getNumCollidablesGpu(), m_data->m_narrowphase->getCollidablesCpu(),
+ 										m_data->m_narrowphase->getInternalData(), m_data->m_broadphaseSap);
+ }
++
++void b3GpuRigidBodyPipeline::castRaysVk(const b3AlignedObjectArray<b3RayInfo>& rays, b3AlignedObjectArray<b3RayHit>& hitResults, bool update)
++{
++	if (update)
++		this->m_data->m_narrowphase->updateTopLevelAS();
++	this->m_data->m_raycaster->castRaysVk(rays, hitResults,
++										getNumBodies(), this->m_data->m_narrowphase->getBodiesCpu(),
++										m_data->m_narrowphase->getNumCollidablesGpu(), m_data->m_narrowphase->getCollidablesCpu(),
++										m_data->m_narrowphase->getInternalData(), m_data->m_broadphaseSap);
++}
+diff --git a/src/Bullet3OpenCL/RigidBody/b3GpuRigidBodyPipeline.h b/src/Bullet3OpenCL/RigidBody/b3GpuRigidBodyPipeline.h
+index 0e5c6fec1..7317d622a 100644
+--- a/src/Bullet3OpenCL/RigidBody/b3GpuRigidBodyPipeline.h
++++ b/src/Bullet3OpenCL/RigidBody/b3GpuRigidBodyPipeline.h
+@@ -17,20 +17,24 @@ subject to the following restrictions:
+ #define B3_GPU_RIGIDBODY_PIPELINE_H
+ 
+ #include "Bullet3OpenCL/Initialize/b3OpenCLInclude.h"
++#include "Bullet3OpenCL/Initialize/b3VulkanUtils.h"
+ #include "Bullet3Collision/NarrowPhaseCollision/b3Config.h"
+ 
+ #include "Bullet3Common/b3AlignedObjectArray.h"
+ #include "Bullet3Collision/NarrowPhaseCollision/b3RaycastInfo.h"
+ 
++// # Vulkan
++#include "vulkan/vulkan_core.h"
++
+ class b3GpuRigidBodyPipeline
+ {
+ protected:
+-	struct b3GpuRigidBodyPipelineInternalData* m_data;
++	struct b3GpuRigidBodyPipelineInternalData	* m_data;
+ 
+ 	int allocateCollidable();
+ 
+ public:
+-	b3GpuRigidBodyPipeline(cl_context ctx, cl_device_id device, cl_command_queue q, class b3GpuNarrowPhase* narrowphase, class b3GpuBroadphaseInterface* broadphaseSap, struct b3DynamicBvhBroadphase* broadphaseDbvt, const b3Config& config);
++	b3GpuRigidBodyPipeline(cl_context ctx, cl_device_id device, cl_command_queue q, b3VulkanContext vkContext, class b3GpuNarrowPhase* narrowphase, class b3GpuBroadphaseInterface* broadphaseSap, struct b3DynamicBvhBroadphase* broadphaseDbvt, const b3Config& config);
+ 	virtual ~b3GpuRigidBodyPipeline();
+ 
+ 	void stepSimulation(float deltaTime);
+@@ -61,6 +65,7 @@ public:
+ 	void removeConstraint(b3TypedConstraint* constraint);
+ 
+ 	void castRays(const b3AlignedObjectArray<b3RayInfo>& rays, b3AlignedObjectArray<b3RayHit>& hitResults);
++	void castRaysVk(const b3AlignedObjectArray<b3RayInfo>& rays, b3AlignedObjectArray<b3RayHit>& hitResults, bool update = false);
+ 
+ 	cl_mem getBodyBuffer();
+ 
+diff --git a/src/Bullet3OpenCL/RigidBody/b3GpuRigidBodyPipelineInternalData.h b/src/Bullet3OpenCL/RigidBody/b3GpuRigidBodyPipelineInternalData.h
+index e0a26fda1..44a181472 100644
+--- a/src/Bullet3OpenCL/RigidBody/b3GpuRigidBodyPipelineInternalData.h
++++ b/src/Bullet3OpenCL/RigidBody/b3GpuRigidBodyPipelineInternalData.h
+@@ -35,6 +35,8 @@ struct b3GpuRigidBodyPipelineInternalData
+ 	cl_device_id m_device;
+ 	cl_command_queue m_queue;
+ 
++	b3VulkanContext m_vkContext;
++
+ 	cl_kernel m_integrateTransformsKernel;
+ 	cl_kernel m_updateAabbsKernel;
+ 	cl_kernel m_clearOverlappingPairsKernel;

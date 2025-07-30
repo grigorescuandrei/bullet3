@@ -332,13 +332,13 @@ public:
 
 void GpuConvexScene::stepSimulation(float deltaTime) {
 	GpuRigidBodyDemo::stepSimulation(deltaTime);
-	raycastBar->cast(m_data->m_rigidBodyPipeline);
+	//raycastBar->cast(m_data->m_rigidBodyPipeline);
 	//raycastBar->draw();
 	//raycastBar->compare(m_data->m_rigidBodyPipeline);
 }
 
 void GpuConvexScene::physicsDebugDraw(int flags) {
-	raycastBar->draw();
+	//raycastBar->draw();
 }
 
 class GpuConvexPlaneScene : public GpuConvexScene
